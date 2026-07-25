@@ -63,3 +63,7 @@ def facts() -> CanonicalFacts:
             ),
         ),
     )
+
+
+# Re-export Postgres fixtures so `db` / `db_engine` resolve in any test module.
+from db_fixtures import db, db_engine  # noqa: E402,F401
