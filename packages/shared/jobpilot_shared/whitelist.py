@@ -254,7 +254,9 @@ def _check_years_of_experience(facts: CanonicalFacts, output: TailoringOutput) -
     return violations
 
 
-def _check_employers(facts: CanonicalFacts, output: TailoringOutput) -> list[Violation]:
+def _check_employers(
+    facts: CanonicalFacts, output: TailoringOutput, target_company: str | None = None
+) -> list[Violation]:
     allowed_exact = normalize_all(facts.skills) | TECHNOLOGY_LEXICON | _COMMON_CAPITALISED
     # Organisation names are prefix-matched, not exact-matched: the capitalised-run
     # regex stops at lowercase connectors, so "at Example Institute of Technology"
@@ -262,6 +264,11 @@ def _check_employers(facts: CanonicalFacts, output: TailoringOutput) -> list[Vio
     org_names = normalize_all(facts.employer_names()) | normalize_all(
         e.institution for e in facts.education
     )
+    # The company being applied to is legitimately nameable — "seeking a backend
+    # role at Acme" is not an employment claim. Without this the gate rejects
+    # honest summaries and burns every retry on them.
+    if target_company:
+        org_names |= normalize_all([target_company])
 
     def _is_known(key: str) -> bool:
         if key in allowed_exact or key in org_names:
@@ -322,18 +329,27 @@ def _scan_unlisted_tokens(facts: CanonicalFacts, output: TailoringOutput) -> lis
     return warnings
 
 
-def check(facts: CanonicalFacts, output: TailoringOutput) -> GateResult:
+def check(
+    facts: CanonicalFacts,
+    output: TailoringOutput,
+    *,
+    target_company: str | None = None,
+) -> GateResult:
     """Validate a tailoring output against the user's immutable facts.
 
     Returns `Rejected` if the output claims anything the facts do not support, and
     `Ok` (possibly carrying flag-severity warnings) otherwise. Callers must not
     render, persist as approvable, or display any output that does not pass.
+
+    `target_company` is the company being applied to. Naming it is not an
+    employment claim, so it is allowed in prose; omitting it makes the gate
+    stricter, never looser.
     """
     rejections: list[Violation] = []
     rejections += _check_declared_skills(facts, output)
     rejections += _check_employment_indices(facts, output)
     rejections += _check_years_of_experience(facts, output)
-    rejections += _check_employers(facts, output)
+    rejections += _check_employers(facts, output, target_company)
 
     warnings = tuple(_scan_unlisted_tokens(facts, output))
 

@@ -94,7 +94,7 @@ def tailor_job(
                 history=history,
             )
 
-        gate = check(facts, output)
+        gate = check(facts, output, target_company=company)
         last_output, last_gate = output, gate
 
         if gate.passed:

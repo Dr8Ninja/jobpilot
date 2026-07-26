@@ -60,9 +60,14 @@ def _environment() -> Environment:
     )
 
 
-def build_html(facts: CanonicalFacts, output: TailoringOutput) -> str:
+def build_html(
+    facts: CanonicalFacts,
+    output: TailoringOutput,
+    *,
+    target_company: str | None = None,
+) -> str:
     """Render the resume HTML. Runs the gate first — this is layer two."""
-    result = check(facts, output)
+    result = check(facts, output, target_company=target_company)
     if isinstance(result, Rejected):
         rules = ", ".join(sorted({v.rule for v in result.reasons}))
         raise GateNotPassed(
@@ -102,12 +107,14 @@ def render_pdf(
     facts: CanonicalFacts,
     output: TailoringOutput,
     destination: pathlib.Path | str,
+    *,
+    target_company: str | None = None,
 ) -> pathlib.Path:
     """Write a selectable-text, ATS-parseable PDF. Returns the path written."""
     _ensure_native_libraries_discoverable()
     from weasyprint import HTML  # imported lazily: pulls in cairo/pango
 
-    html = build_html(facts, output)
+    html = build_html(facts, output, target_company=target_company)
     path = pathlib.Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:

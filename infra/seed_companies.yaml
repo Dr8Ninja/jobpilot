@@ -1,0 +1,24 @@
+# Greenhouse board registry seed.
+#
+# Each entry maps a company to its public Greenhouse board token — the `{token}`
+# in https://boards.greenhouse.io/{token}. Find it by opening a company's careers
+# page and reading the URL.
+#
+# VERIFY BEFORE RELYING ON THESE. Board tokens change and companies migrate
+# between ATS vendors; a stale token is logged and skipped, it does not break the
+# run. Add your own targets here — this file is the whole registry until the
+# aggregator starts growing it.
+#
+# `jobpilot seed-companies infra/seed_companies.yaml` loads it (idempotent).
+
+companies:
+  # Demo entry. Matches the recorded fixtures so `JOBPILOT_FIXTURE_MODE=1
+  # jobpilot run-pipeline` produces a populated queue out of the box.
+  # Replace it with your real targets.
+  - name: Acme Corp
+    board_token: acme
+    ats_provider: greenhouse
+
+  # - name: Some Startup
+  #   board_token: somestartup
+  #   ats_provider: greenhouse

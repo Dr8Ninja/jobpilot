@@ -16,6 +16,7 @@ dependencies = [
     "pdfplumber>=0.11",
     "weasyprint>=62",
     "jinja2>=3.1",
+    "pyyaml>=6.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
 ]
@@ -46,6 +47,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Typer declares CLI options as argument defaults; that is the documented API.
+"services/api/jobpilot_api/cli.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

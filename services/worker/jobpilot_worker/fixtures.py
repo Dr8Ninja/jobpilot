@@ -194,3 +194,49 @@ class FixtureLLMClient:
 
 def build_fake_llm_client() -> FixtureLLMClient:
     return FixtureLLMClient()
+
+
+# ---------------------------------------------------------------------------
+# Fixture HTTP: recorded API responses so discovery runs without credentials.
+# ---------------------------------------------------------------------------
+
+FIXTURE_DATA = __import__("pathlib").Path(__file__).parent / "fixture_data"
+
+
+def fixture_fetch(url: str, **kwargs):
+    """Stand-in for `clients.http.fetch`, serving recorded payloads.
+
+    Unknown URLs raise rather than returning empty: a silent no-op would look
+    exactly like "the board had no jobs today", which is the wrong signal when
+    you are trying to see the pipeline work.
+    """
+    from .clients.http import FetchResult
+
+    if "boards-api.greenhouse.io" in url:
+        return FetchResult(
+            url=url,
+            status=200,
+            text=(FIXTURE_DATA / "greenhouse_board.json").read_text(),
+            final_url=url,
+        )
+    if "api.adzuna.com" in url:
+        return FetchResult(
+            url=url,
+            status=200,
+            text=(FIXTURE_DATA / "adzuna_search.json").read_text(),
+            final_url=url,
+        )
+    if "adzuna.in/land/ad/4900000001" in url:
+        # This aggregator hit resolves to a Greenhouse job we already have, which
+        # is what exercises the certainty dedupe path end to end.
+        return FetchResult(
+            url=url,
+            status=200,
+            text="<html></html>",
+            final_url="https://boards.greenhouse.io/acme/jobs/4012345",
+        )
+    if "adzuna.in/land/ad/" in url:
+        return FetchResult(
+            url=url, status=200, text="<html></html>", final_url="https://example.invalid/careers"
+        )
+    raise AssertionError(f"Fixture mode has no recorded response for {url}")

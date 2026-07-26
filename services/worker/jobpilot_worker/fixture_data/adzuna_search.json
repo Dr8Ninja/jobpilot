@@ -1,0 +1,34 @@
+{
+  "count": 3,
+  "results": [
+    {
+      "id": "4900000001",
+      "title": "Software Engineer, Backend",
+      "description": "We are hiring a backend engineer. Python and PostgreSQL. 1-3 years…",
+      "redirect_url": "https://www.adzuna.in/land/ad/4900000001",
+      "company": { "display_name": "Acme Corp" },
+      "location": { "display_name": "Bengaluru, India" },
+      "created": "2026-07-20T10:00:00Z"
+    },
+    {
+      "id": "4900000002",
+      "title": "Backend Developer",
+      "description": "Django shop looking for a mid-level developer to own the API…",
+      "redirect_url": "https://www.adzuna.in/land/ad/4900000002",
+      "company": { "display_name": "Gamma Systems" },
+      "location": { "display_name": "Remote" },
+      "salary_min": 1200000,
+      "salary_max": 1800000,
+      "created": "2026-07-21T10:00:00Z"
+    },
+    {
+      "id": "4900000003",
+      "title": "Python Engineer",
+      "description": "Join our data platform team building ingestion pipelines…",
+      "redirect_url": "https://www.adzuna.in/land/ad/4900000003",
+      "company": { "display_name": "Delta Analytics" },
+      "location": { "display_name": "Pune, India" },
+      "created": "2026-07-22T10:00:00Z"
+    }
+  ]
+}

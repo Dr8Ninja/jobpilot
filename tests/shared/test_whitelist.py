@@ -283,3 +283,40 @@ def test_retry_prompt_names_every_rule_and_evidence(facts: CanonicalFacts) -> No
     prompt = format_violations_for_retry(result.reasons)
     assert "unknown_skill" in prompt
     assert "Kubernetes" in prompt
+
+
+# --------------------------------------------------------------------------
+# target_company — naming the company you are applying to is not a claim
+# --------------------------------------------------------------------------
+
+
+def test_target_company_in_prose_is_rejected_without_context(facts: CanonicalFacts) -> None:
+    """Default behaviour stays strict: an unknown org is a rejection."""
+    result = check(facts, _output(summary="Backend engineer targeting a role at Gamma Systems."))
+    assert isinstance(result, Rejected)
+    assert "unknown_employer" in _rules(result)
+
+
+def test_target_company_is_allowed_when_supplied(facts: CanonicalFacts) -> None:
+    """Found by running the pipeline: honest summaries were being rejected.
+
+    "Seeking a backend role at Gamma Systems" names the company being applied to,
+    not one the candidate claims to have worked for.
+    """
+    result = check(
+        facts,
+        _output(summary="Backend engineer targeting a role at Gamma Systems."),
+        target_company="Gamma Systems",
+    )
+    assert result.passed, getattr(result, "reasons", None)
+
+
+def test_target_company_does_not_whitelist_other_employers(facts: CanonicalFacts) -> None:
+    """The exemption is one company wide, not a hole in the rule."""
+    result = check(
+        facts,
+        _output(rewritten="Led the payments rewrite at Google."),
+        target_company="Gamma Systems",
+    )
+    assert isinstance(result, Rejected)
+    assert "unknown_employer" in _rules(result)

@@ -55,7 +55,7 @@ def search(
     fetch_fn=fetch,
 ) -> AggregatorResult:
     settings = get_settings()
-    if not settings.adzuna_app_id or not settings.adzuna_app_key:
+    if not settings.fixture_mode and (not settings.adzuna_app_id or not settings.adzuna_app_key):
         return AggregatorResult([], error="ADZUNA_APP_ID / ADZUNA_APP_KEY not configured")
 
     query = urlencode(
