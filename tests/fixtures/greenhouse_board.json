@@ -1,0 +1,28 @@
+{
+  "jobs": [
+    {
+      "id": 4012345,
+      "title": "Software Engineer, Backend",
+      "updated_at": "2026-07-20T10:00:00Z",
+      "location": { "name": "Bengaluru, India" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4012345",
+      "content": "&lt;p&gt;We are hiring a backend engineer.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Python and PostgreSQL&lt;/li&gt;&lt;li&gt;1-3 years of experience&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 4012346,
+      "title": "Frontend Engineer",
+      "updated_at": "2026-07-21T10:00:00Z",
+      "location": { "name": "Remote" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4012346",
+      "content": "&lt;p&gt;React and TypeScript work on our dashboard.&lt;/p&gt;"
+    },
+    {
+      "id": 4012347,
+      "title": "Staff Engineer, Platform",
+      "updated_at": "2026-07-22T10:00:00Z",
+      "location": { "name": "Remote" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4012347",
+      "content": "&lt;p&gt;Lead platform architecture. 8+ years required.&lt;/p&gt;"
+    }
+  ]
+}
