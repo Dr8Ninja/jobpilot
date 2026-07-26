@@ -1,0 +1,242 @@
+"""FastAPI app backing the review dashboard.
+
+The approvability filter lives here: a card whose tailoring run did not pass the
+whitelist gate can be *seen* (so the human can inspect what went wrong) but can
+never be approved. That is enforcement layer one; `render.py` re-checking the
+gate itself is layer two, and the two fail independently.
+"""
+
+import datetime as dt
+import pathlib
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from jobpilot_shared.db.models import Application, Company, Event, Job, Score, TailoringRun
+from jobpilot_shared.db.session import get_session_factory
+from sqlalchemy import desc, select
+from sqlalchemy.orm import Session
+
+from .schemas import BulletDiff, GateNote, QueueCard, QueueDetail
+
+app = FastAPI(title="JobPilot", version="0.1.0")
+
+# The dashboard is a local Next.js dev server; this is a single-user local tool.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def get_db() -> Session:
+    session = get_session_factory()()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def _notes(raw: list | None) -> list[GateNote]:
+    return [GateNote(**item) for item in (raw or [])]
+
+
+def _latest_run(session: Session, job_id: int) -> TailoringRun | None:
+    return session.scalar(
+        select(TailoringRun)
+        .where(TailoringRun.job_id == job_id)
+        .order_by(desc(TailoringRun.created_at))
+        .limit(1)
+    )
+
+
+def _latest_score(session: Session, job_id: int) -> Score | None:
+    return session.scalar(
+        select(Score).where(Score.job_id == job_id).order_by(desc(Score.scored_at)).limit(1)
+    )
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.get("/api/queue", response_model=list[QueueCard])
+def list_queue(status: str | None = None, db: Session = Depends(get_db)):
+    statement = (
+        select(Application, Job, Company)
+        .join(Job, Job.id == Application.job_id)
+        .join(Company, Company.id == Job.company_id)
+        .order_by(desc(Application.created_at))
+    )
+    if status:
+        statement = statement.where(Application.status == status)
+
+    cards: list[QueueCard] = []
+    for application, job, company in db.execute(statement).all():
+        run = _latest_run(db, job.id)
+        score = _latest_score(db, job.id)
+        cards.append(
+            QueueCard(
+                application_id=application.id,
+                job_id=job.id,
+                company=company.name,
+                title=job.title,
+                location=job.location,
+                salary=job.salary,
+                match_score=score.match_score if score else None,
+                status=application.status,
+                source=job.source,
+                description_quality=job.description_quality,
+                apply_url=job.apply_url,
+                has_pdf=bool(run and run.pdf_path),
+                warning_count=len((run.gate_warnings or []) if run else []),
+                created_at=application.created_at,
+            )
+        )
+    return cards
+
+
+@app.get("/api/queue/{application_id}", response_model=QueueDetail)
+def get_card(application_id: int, db: Session = Depends(get_db)):
+    application = db.get(Application, application_id)
+    if application is None:
+        raise HTTPException(404, "Application not found")
+
+    job = db.get(Job, application.job_id)
+    company = db.get(Company, job.company_id)
+    run = _latest_run(db, job.id)
+    score = _latest_score(db, job.id)
+
+    output = (run.output if run else {}) or {}
+    verdict = (score.verdict if score else {}) or {}
+
+    diffs: list[BulletDiff] = []
+    for bullet in output.get("tailored_bullets", []):
+        index = bullet.get("employment_index", 0)
+        diffs.append(
+            BulletDiff(
+                employment_index=index,
+                company=_employer_name(db, job, index),
+                original=bullet.get("original", ""),
+                rewritten=bullet.get("rewritten", ""),
+                skills_referenced=bullet.get("skills_referenced", []),
+                changed=bullet.get("original") != bullet.get("rewritten"),
+            )
+        )
+
+    return QueueDetail(
+        application_id=application.id,
+        job_id=job.id,
+        company=company.name,
+        title=job.title,
+        location=job.location,
+        salary=job.salary,
+        status=application.status,
+        source=job.source,
+        description_quality=job.description_quality,
+        apply_url=job.apply_url,
+        description=job.description,
+        match_score=score.match_score if score else None,
+        rationale=verdict.get("rationale"),
+        must_have_coverage=verdict.get("must_have_coverage", []),
+        keyword_gaps=verdict.get("keyword_gaps", []),
+        seniority_fit=verdict.get("seniority_fit"),
+        summary=output.get("summary", ""),
+        diffs=diffs,
+        skills_ordered=output.get("skills_ordered_for_this_jd", []),
+        whitelist_passed=bool(run and run.whitelist_passed),
+        warnings=_notes(run.gate_warnings if run else None),
+        rejections=_notes(run.gate_rejections if run else None),
+        attempts=run.attempt if run else 0,
+        has_pdf=bool(run and run.pdf_path),
+    )
+
+
+def _employer_name(db: Session, job: Job, index: int) -> str:
+    from jobpilot_shared.db.models import Profile
+
+    profile = db.scalar(select(Profile))
+    employment = ((profile.canonical_facts or {}) if profile else {}).get("employment", [])
+    if 0 <= index < len(employment):
+        return employment[index].get("company", "")
+    return ""
+
+
+def _transition(db: Session, application_id: int, status: str, *, require_gate: bool) -> dict:
+    application = db.get(Application, application_id)
+    if application is None:
+        raise HTTPException(404, "Application not found")
+
+    if require_gate:
+        run = _latest_run(db, application.job_id)
+        if run is None or not run.whitelist_passed:
+            # Layer one. Nothing that failed the fact-check can be approved,
+            # regardless of what the client sends.
+            raise HTTPException(
+                409,
+                "This tailoring run did not pass the whitelist gate and cannot be "
+                "approved. Inspect the rejections, then re-run tailoring.",
+            )
+
+    now = dt.datetime.now(dt.UTC)
+    application.status = status
+    if status == "approved":
+        application.approved_at = now
+    elif status == "rejected":
+        application.rejected_at = now
+    elif status == "applied":
+        application.applied_at = now
+
+    db.add(
+        Event(
+            application_id=application.id,
+            job_id=application.job_id,
+            type=f"application.{status}",
+            payload={"at": now.isoformat()},
+        )
+    )
+    db.flush()
+    return {"application_id": application.id, "status": application.status}
+
+
+@app.post("/api/queue/{application_id}/approve")
+def approve(application_id: int, db: Session = Depends(get_db)):
+    return _transition(db, application_id, "approved", require_gate=True)
+
+
+@app.post("/api/queue/{application_id}/reject")
+def reject(application_id: int, db: Session = Depends(get_db)):
+    return _transition(db, application_id, "rejected", require_gate=False)
+
+
+@app.post("/api/queue/{application_id}/applied")
+def mark_applied(application_id: int, db: Session = Depends(get_db)):
+    """Phase 0 apply is manual: the human applies, then records it here.
+
+    These events are the substrate the response-rate baseline is computed from.
+    """
+    return _transition(db, application_id, "applied", require_gate=True)
+
+
+@app.get("/api/queue/{application_id}/pdf")
+def get_pdf(application_id: int, db: Session = Depends(get_db)):
+    application = db.get(Application, application_id)
+    if application is None:
+        raise HTTPException(404, "Application not found")
+
+    run = _latest_run(db, application.job_id)
+    if run is None or not run.pdf_path:
+        raise HTTPException(404, "No PDF for this application")
+    if not run.whitelist_passed:
+        raise HTTPException(409, "Refusing to serve a PDF for output that failed the gate")
+
+    path = pathlib.Path(run.pdf_path)
+    if not path.exists():
+        raise HTTPException(404, f"PDF missing on disk: {path}")
+    return FileResponse(path, media_type="application/pdf", filename=path.name)

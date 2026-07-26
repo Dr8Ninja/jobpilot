@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* A review tool, not a marketing page: dense, quiet, high-contrast where it
+   matters (the diff), muted everywhere else. Slate ink on warm paper so long
+   review sessions are easy on the eyes. */
+@theme {
+  --color-paper: #faf9f7;
+  --color-ink: #1c1b1a;
+  --color-muted: #6b6862;
+  --color-rule: #e4e1dc;
+  --color-accent: #1f5f4f;
+  --color-added: #e8f3ee;
+  --color-removed: #fbeeee;
+  --color-warn: #8a6d1f;
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

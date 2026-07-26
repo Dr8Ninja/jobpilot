@@ -51,6 +51,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Typer declares CLI options as argument defaults; that is the documented API.
 "services/api/jobpilot_api/cli.py" = ["B008"]
+# FastAPI declares dependencies as argument defaults; that is the documented API.
+"services/api/jobpilot_api/main.py" = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
