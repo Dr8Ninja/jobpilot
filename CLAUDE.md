@@ -54,36 +54,42 @@ Verify current Claude model IDs/features at https://docs.claude.com/en/api/overv
 ## Repo layout (target — create as you go, keep this map current)
 
 ```
-PRD.md              # requirements, source of truth
-/apps/web                 # Next.js dashboard (review queue, diff view, approve/edit/reject)
-/services/api             # FastAPI: parsing, matching, tailoring, PDF, REST/WS
-/services/worker          # Celery tasks: discovery cron, scoring, tailoring, PDF gen
-/packages/extension       # assisted-apply browser extension + field-mapping registry
-/packages/shared          # shared schemas/types (canonical_facts, tailoring output)
-/infra                    # docker-compose (postgres+pgvector, redis), env templates
-/tests                    # see testing discipline below
+PRD.md                    # requirements, source of truth
+README.md                 # setup + how to run it
+/apps/web                 # Next.js dashboard (queue, diff view, approve/reject)
+/services/api             # FastAPI queue endpoints + Typer CLI
+/services/worker          # pipeline stages, clients, prompts, fixtures, templates
+/packages/extension       # assisted-apply browser extension — Phase 1, not created yet
+/packages/shared          # canonical_facts, tailoring/scoring IO, the whitelist gate, db models
+/migrations               # Alembic
+/infra                    # seed_companies.yaml; docker-compose is Phase 1+
+/tests                    # shared/ worker/ api/ + fixtures
 ```
 
 ## Commands (target — implement and keep accurate)
 
 ```bash
-# Backend
-uv run uvicorn services.api.main:app --reload    # run API
-uv run celery -A services.worker worker -l info  # run worker
-uv run celery -A services.worker beat -l info    # run scheduler (discovery cron)
+# Pipeline (each stage is individually invocable; run-pipeline composes them)
+uv run jobpilot version | seed-companies | ingest-resume | confirm-facts
+uv run jobpilot discover | run-pipeline | queue
 
-# Frontend
-pnpm --filter web dev
+# Services
+uv run uvicorn jobpilot_api.main:app --reload     # API on :8000
+cd apps/web && npm run dev                        # dashboard on :3000
 
 # Quality gates (must pass before "done")
 uv run ruff check . && uv run ruff format --check .
-uv run pytest -q
-pnpm --filter web lint && pnpm --filter web typecheck
-pnpm --filter web test
+uv run pytest
+cd apps/web && npm run typecheck && npm run test && npm run build
 
-# Infra
-docker compose -f infra/docker-compose.yml up -d   # postgres+pgvector, redis
+# Infra — local Postgres, not Docker (no Docker on the dev machine)
+brew services start postgresql@17
+uv run alembic upgrade head
 ```
+
+> `npm`, not `pnpm` — pnpm is not installed on the dev machine.
+> Celery + Redis are deferred to the end of Phase 0; stages are plain functions,
+> so no broker is needed to run or test the pipeline.
 
 > When you add or change a command, update this block in the same PR.
 
@@ -110,11 +116,18 @@ docker compose -f infra/docker-compose.yml up -d   # postgres+pgvector, redis
 
 ## Roadmap & acceptance criteria
 
-### Phase 0 — Prove the loop (one ATS, manual apply)
+### Phase 0 — Prove the loop (manual apply)
 Build the full pipeline end-to-end except automated form-fill; user applies manually using the generated PDF to validate quality first.
+
+> **Amended 2026-07-26 (user direction):** aggregator discovery moved *out of
+> Phase 2 and into Phase 0*, serving both as company-registry growth and as a
+> direct job source. Cross-source dedupe is certainty-only — an aggregator row is
+> dropped solely on a matching Greenhouse `(board_token, ats_job_id)`, never on a
+> fuzzy title match. See `docs/superpowers/specs/2026-07-25-phase-0-design.md` §2.3.
+
 **Acceptance:**
 - Ingest base resume → produce a confirmed `canonical_facts` object.
-- Discovery from **Greenhouse board API only**, upserted + deduped in Postgres.
+- Discovery from the Greenhouse board API **and Adzuna**, upserted + deduped in Postgres.
 - Embedding pre-filter (pgvector) + LLM scoring with structured JSON output.
 - Tailoring + **whitelist gate passing in tests** + WeasyPrint PDF with selectable text.
 - Dashboard: queue with diff view + approve/reject.
@@ -130,7 +143,7 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 
 ### Phase 2 — Scale & polish
 **Acceptance:**
-- Aggregator-driven company discovery auto-grows the `companies` registry.
+- ~~Aggregator-driven company discovery auto-grows the `companies` registry.~~ *(moved to Phase 0)*
 - Response-rate analytics (which tailoring/keywords correlate with replies).
 - Pacing controls; edit-in-place with PDF re-render.
 - (Optional, high-effort) Workday support — only if justified by data.
@@ -150,14 +163,38 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 ## Progress ledger (living — update at the end of every session)
 
 **Current phase:** Phase 0
-**Now working on:** _project scaffolding / infra not yet started_
-**Next action:** stand up repo layout + `docker-compose` (postgres+pgvector, redis), then `canonical_facts` schema and ingestion.
-**Blockers:** none
+**Now working on:** Phase 0 is functionally complete and runs end to end. Remaining: Celery beat schedule (the nightly wrapper), and validating tailoring quality against a real resume + real board tokens.
+**Next action:** supply real credentials + a real resume, replace the demo seed in `infra/seed_companies.yaml`, run the loop live, and judge the tailoring output.
+**Blockers:** needs user input — API keys, a base resume PDF, real Greenhouse board tokens, and the response-rate baseline figure.
 
 ### Done
-- [ ] _nothing yet_
+- [x] Phase 0 design spec + implementation plan (`docs/superpowers/specs/`, `docs/superpowers/plans/`)
+- [x] `canonical_facts` schemas — frozen, strict, JSON round-tripping
+- [x] **Whitelist gate** — pure function in `packages/shared`, 4 rules, 39 adversarial tests
+- [x] Data model + Alembic migration; certainty dedupe enforced by a partial unique index
+- [x] Greenhouse board discovery with per-board failure isolation
+- [x] Adzuna discovery + redirect resolution + certainty-only cross-source dedupe
+- [x] Voyage embeddings + pgvector pre-filter
+- [x] LLM scoring (strict JSON via `output_config.format`, no sampling params)
+- [x] Tailoring with gate retry loop; `needs_human` after the attempt budget
+- [x] WeasyPrint PDF + round-trip test extracting the artefact with pdfplumber
+- [x] FastAPI queue endpoints; approval blocked on `whitelist_passed`
+- [x] Next.js review dashboard: queue, word-level diff, approve/reject/mark-applied
+- [x] Fixture mode — full pipeline with zero API keys
+- [x] CLI: seed-companies, ingest-resume, confirm-facts, discover, run-pipeline, queue
 
 ### In progress
-- [ ] _nothing yet_
+- [ ] Celery beat schedule wrapping `run_pipeline` (the last Phase 0 item)
 
-> Update the three status lines above and check off items as you complete them. Note decisions and blockers here so the next session (and claude-mem) has continuity.
+### Decisions worth remembering
+- **No sampling parameters anywhere.** `temperature`/`top_p`/`top_k` are rejected
+  with a 400 on Claude Sonnet 5. Structure comes from `output_config.format`.
+  `max_tokens` carries headroom because adaptive thinking is on by default.
+- **The gate takes an optional `target_company`.** Naming the company you are
+  applying *to* is not an employment claim; without this every honest summary
+  burned all three retries. Found by running the pipeline, not by review.
+- **Tailwind v4**: `@theme` tokens generate utilities (`bg-accent`). The v3
+  `bg-[--color-accent]` form silently emits nothing.
+- Postgres is local via Homebrew, not Docker — Docker is not installed here.
+
+> Update the three status lines above and check off items as you complete them.
