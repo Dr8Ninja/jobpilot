@@ -261,8 +261,11 @@ def _check_employers(
     # Organisation names are prefix-matched, not exact-matched: the capitalised-run
     # regex stops at lowercase connectors, so "at Example Institute of Technology"
     # only yields "Example Institute" and must still resolve to the real institution.
-    org_names = normalize_all(facts.employer_names()) | normalize_all(
-        e.institution for e in facts.education
+    org_names = (
+        normalize_all(facts.employer_names())
+        | normalize_all(e.institution for e in facts.education)
+        # Naming your own project is not an employment claim.
+        | normalize_all(p.name for p in facts.projects)
     )
     # The company being applied to is legitimately nameable — "seeking a backend
     # role at Acme" is not an employment claim. Without this the gate rejects

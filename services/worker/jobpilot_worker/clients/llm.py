@@ -134,4 +134,8 @@ def get_llm_client() -> LLMClient:
         from ..fixtures import build_fake_llm_client
 
         return build_fake_llm_client()
-    return AnthropicLLMClient()
+    if settings.llm_provider == "anthropic":
+        return AnthropicLLMClient()
+    from .openai_compat import OpenAICompatLLMClient
+
+    return OpenAICompatLLMClient()

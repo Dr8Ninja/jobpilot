@@ -23,11 +23,26 @@ def test_defaults_match_the_phase_0_dials() -> None:
     assert s.fixture_mode is False
 
 
-def test_models_are_pinned_without_date_suffixes() -> None:
+def test_models_are_pinned_and_measured() -> None:
+    """Defaults were chosen by benchmarking this account, not by reputation.
+
+    GLM-5.2 and DeepSeek V4 Pro are listed by NVIDIA but never return a token on
+    the free tier, so they must not be the defaults.
+    """
     s = Settings()
-    assert s.tailoring_model == "claude-sonnet-5"
-    assert s.embedding_model == "voyage-3"
+    assert s.llm_provider == "nvidia"
+    assert s.tailoring_model == "openai/gpt-oss-120b"
+    assert s.scoring_model == "nvidia/nemotron-3-super-120b-a12b"
+    assert s.embedding_provider == "nvidia"
+    assert s.embedding_model == "nvidia/nv-embedqa-e5-v5"
     assert s.embedding_dimensions == 1024
+
+
+def test_fallback_chain_is_parsed() -> None:
+    """A model that stops serving must not take the whole run down with it."""
+    models = Settings().llm_fallback_models_list()
+    assert len(models) >= 2
+    assert all("/" in m for m in models)
 
 
 def test_credentials_default_empty_so_fixture_mode_can_run(monkeypatch) -> None:

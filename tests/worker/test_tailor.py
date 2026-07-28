@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from jobpilot_shared.canonical_facts import CanonicalFacts
+from jobpilot_shared.settings import get_settings
 from jobpilot_shared.tailoring_io import TailoredBullet, TailoringOutput
 from jobpilot_worker.clients.llm import FakeLLMClient, LLMRefusal
 from jobpilot_worker.stages.tailor import tailor_job
@@ -126,4 +127,4 @@ def test_no_sampling_parameters_are_ever_sent(facts: CanonicalFacts) -> None:
     call = client.calls[0]
     for banned in ("temperature", "top_p", "top_k"):
         assert banned not in call
-    assert call["model"] == "claude-sonnet-5"
+    assert call["model"] == get_settings().tailoring_model

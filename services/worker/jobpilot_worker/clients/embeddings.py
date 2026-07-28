@@ -67,7 +67,47 @@ class FakeEmbeddingClient:
         return [v / norm for v in raw]
 
 
+class NvidiaEmbeddingClient:
+    """NVIDIA NIM embeddings, on the same key as the chat models.
+
+    `nv-embedqa-e5-v5` returns 1024 dimensions — the same width as voyage-3, so
+    switching providers needs no migration and no reindex. It also takes
+    `input_type` as passage/query rather than document/query, which is the only
+    wire difference worth knowing about.
+    """
+
+    _INPUT_TYPES = {"document": "passage", "query": "query"}
+
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+        from openai import OpenAI
+
+        settings = get_settings()
+        key = api_key if api_key is not None else settings.nvidia_api_key
+        if not key:
+            raise RuntimeError(
+                "NVIDIA_API_KEY is not set. Put it in .env, or run with "
+                "JOBPILOT_FIXTURE_MODE=1 for deterministic local embeddings."
+            )
+        self._model = model or settings.embedding_model
+        self._client = OpenAI(
+            api_key=key, base_url=settings.nvidia_base_url, timeout=60.0, max_retries=2
+        )
+
+    def embed(self, texts: list[str], *, input_type: str = "document") -> list[list[float]]:
+        if not texts:
+            return []
+        response = self._client.embeddings.create(
+            model=self._model,
+            input=texts,
+            extra_body={"input_type": self._INPUT_TYPES.get(input_type, "passage")},
+        )
+        return [item.embedding for item in sorted(response.data, key=lambda d: d.index)]
+
+
 def get_embedding_client() -> EmbeddingClient:
-    if get_settings().fixture_mode:
+    settings = get_settings()
+    if settings.fixture_mode:
         return FakeEmbeddingClient()
-    return VoyageEmbeddingClient()
+    if settings.embedding_provider == "voyage":
+        return VoyageEmbeddingClient()
+    return NvidiaEmbeddingClient()

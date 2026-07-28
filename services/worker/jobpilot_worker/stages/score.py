@@ -51,7 +51,8 @@ def score_candidates(
 
         row = Score(
             job_id=job.id,
-            match_score=verdict.match_score,
+            # Band-derived, not the model's raw integer — see scoring_io.
+            match_score=verdict.effective_score,
             similarity=getattr(candidate, "similarity", None),
             verdict=verdict.model_dump(),
         )
@@ -66,13 +67,28 @@ def select_for_tailoring(scores: list[Score]) -> list[Score]:
 
     This is where the queue is bounded well below carpet-bomb levels — by design,
     not by accident (CLAUDE.md non-negotiable #4).
+
+    The decision is **derived in code** from `match_score` and `seniority_fit`,
+    never taken from the model's own `should_apply`. Models were observed
+    returning "skip" on an 88 and "tailor" on a 15; letting that gate the queue
+    means one model quirk produces a silently empty morning review.
     """
     settings = get_settings()
-    eligible = [
-        s
-        for s in scores
-        if s.match_score >= settings.match_score_threshold
-        and (s.verdict or {}).get("recommendation") != "skip"
-    ]
+
+    eligible: list[Score] = []
+    for row in scores:
+        verdict = row.verdict or {}
+        if row.match_score < settings.match_score_threshold:
+            continue
+        if verdict.get("seniority_fit") == "mismatch":
+            continue
+        if verdict.get("should_apply") is False:
+            log.info(
+                "Job %s: model said should_apply=false but scored %s — selecting on the score.",
+                row.job_id,
+                row.match_score,
+            )
+        eligible.append(row)
+
     eligible.sort(key=lambda s: s.match_score, reverse=True)
     return eligible[: settings.max_tailored_per_day]

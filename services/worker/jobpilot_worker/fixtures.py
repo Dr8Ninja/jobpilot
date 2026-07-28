@@ -146,6 +146,7 @@ class FixtureLLMClient:
         score = max(10, base - 40) if is_stretch else min(97, base + _stable_int(title, 0, 8))
 
         return ScoreVerdict(
+            fit_band="weak" if is_stretch else ("excellent" if score >= 85 else "strong"),
             match_score=score,
             must_have_coverage=[f"{s}: met" for s in matched[:6]],
             keyword_gaps=[
@@ -154,7 +155,7 @@ class FixtureLLMClient:
                 if token.lower() in jd and token not in facts.skills
             ],
             seniority_fit="stretch" if is_stretch else "good",
-            recommendation="skip" if is_stretch else "tailor",
+            should_apply=not is_stretch,
             rationale=(
                 "Seniority is above the candidate's experience; skipping."
                 if is_stretch

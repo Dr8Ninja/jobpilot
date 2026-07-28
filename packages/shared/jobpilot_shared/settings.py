@@ -32,11 +32,47 @@ class Settings(BaseSettings):
     )
     embed_top_k: int = Field(default=40, validation_alias=_jobpilot("embed_top_k"))
 
-    tailoring_model: str = "claude-sonnet-5"
-    scoring_model: str = "claude-sonnet-5"
-    extraction_model: str = "claude-sonnet-5"
-    embedding_model: str = "voyage-3"
+    # "nvidia" (OpenAI-compatible NIM) or "anthropic".
+    llm_provider: str = Field(default="nvidia", validation_alias=_jobpilot("llm_provider"))
+    nvidia_api_key: str = ""
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+
+    # Defaults chosen by measurement, not by reputation: both answer a strict
+    # json_schema request in under 3s on this account. GLM-5.2 and DeepSeek V4 Pro
+    # are listed by NVIDIA but never return a token on the free tier — set them
+    # here if that changes.
+    tailoring_model: str = Field(
+        default="openai/gpt-oss-120b", validation_alias=_jobpilot("tailoring_model")
+    )
+    scoring_model: str = Field(
+        default="nvidia/nemotron-3-super-120b-a12b",
+        validation_alias=_jobpilot("scoring_model"),
+    )
+    extraction_model: str = Field(
+        default="openai/gpt-oss-120b", validation_alias=_jobpilot("extraction_model")
+    )
+    #: Tried in order when the requested model times out or is not served.
+    llm_fallback_models: str = Field(
+        default="openai/gpt-oss-120b,nvidia/nemotron-3-super-120b-a12b",
+        validation_alias=_jobpilot("llm_fallback_models"),
+    )
+    llm_timeout_seconds: float = Field(
+        default=90.0, validation_alias=_jobpilot("llm_timeout_seconds")
+    )
+
+    # "nvidia" reuses the chat key; "voyage" needs a separate pa-... key.
+    embedding_provider: str = Field(
+        default="nvidia", validation_alias=_jobpilot("embedding_provider")
+    )
+    embedding_model: str = Field(
+        default="nvidia/nv-embedqa-e5-v5", validation_alias=_jobpilot("embedding_model")
+    )
+    #: nv-embedqa-e5-v5 and voyage-3 are both 1024-wide, so the two providers are
+    #: interchangeable without a migration or a reindex.
     embedding_dimensions: int = 1024
+
+    def llm_fallback_models_list(self) -> list[str]:
+        return [m.strip() for m in self.llm_fallback_models.split(",") if m.strip()]
 
     # Claude Sonnet 5 runs adaptive thinking by default and max_tokens caps
     # thinking + output together, so these carry headroom above the JSON payload.
