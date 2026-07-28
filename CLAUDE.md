@@ -43,7 +43,8 @@ A personal, semi-automated job-application tool for one user (a ~1.5-YOE softwar
 | DB / Auth / Storage | Supabase (Postgres) + **pgvector** |
 | Async workers | Celery + Redis |
 | Resume parsing | `pdfplumber` (or `unstructured`) |
-| LLM | Claude API — **Sonnet 5** for bulk tailoring via **Message Batches API**, **Opus 4.8** for premium/top roles; enforce structure via tool-use / strict JSON |
+| LLM | NVIDIA NIM (OpenAI-compatible): `openai/gpt-oss-120b` tailoring, `nvidia/nemotron-3-super-120b-a12b` scoring. Structure via `response_format` json_schema strict. Anthropic client retained behind the same Protocol. |
+| Embeddings | `nvidia/nv-embedqa-e5-v5` (1024-dim, 512-token cap) on the same key |
 | PDF generation | WeasyPrint (HTML/CSS → selectable-text, ATS-parseable PDF) |
 | Apply layer | Browser extension (preferred) or headed Playwright |
 
@@ -127,7 +128,8 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 
 **Acceptance:**
 - Ingest base resume → produce a confirmed `canonical_facts` object.
-- Discovery from the Greenhouse board API **and Adzuna**, upserted + deduped in Postgres.
+- Discovery from Greenhouse, Lever, Ashby, Workable, SmartRecruiters, three keyless
+  remote boards (Remotive/Arbeitnow/RemoteOK), **and Adzuna**, upserted + deduped.
 - Embedding pre-filter (pgvector) + LLM scoring with structured JSON output.
 - Tailoring + **whitelist gate passing in tests** + WeasyPrint PDF with selectable text.
 - Dashboard: queue with diff view + approve/reject.
@@ -163,9 +165,9 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 ## Progress ledger (living — update at the end of every session)
 
 **Current phase:** Phase 0
-**Now working on:** Phase 0 is functionally complete and runs end to end. Remaining: Celery beat schedule (the nightly wrapper), and validating tailoring quality against a real resume + real board tokens.
-**Next action:** supply real credentials + a real resume, replace the demo seed in `infra/seed_companies.yaml`, run the loop live, and judge the tailoring output.
-**Blockers:** needs user input — API keys, a base resume PDF, real Greenhouse board tokens, and the response-rate baseline figure.
+**Now working on:** Phase 0 runs live against the real resume and 75 verified boards (11,144 jobs discovered). Remaining Phase 0 item: Celery beat schedule.
+**Next action:** user judges tailoring quality on the live queue; then Phase 1 (assisted-apply extension).
+**Blockers:** response-rate baseline figure still not supplied. GLM-5.2/DeepSeek V4 Pro unavailable on the provided key.
 
 ### Done
 - [x] Phase 0 design spec + implementation plan (`docs/superpowers/specs/`, `docs/superpowers/plans/`)
@@ -187,12 +189,26 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 - [ ] Celery beat schedule wrapping `run_pipeline` (the last Phase 0 item)
 
 ### Decisions worth remembering
-- **No sampling parameters anywhere.** `temperature`/`top_p`/`top_k` are rejected
-  with a 400 on Claude Sonnet 5. Structure comes from `output_config.format`.
-  `max_tokens` carries headroom because adaptive thinking is on by default.
+- **Provider is NVIDIA NIM, not Anthropic.** `z-ai/glm-5.2` and
+  `deepseek-ai/deepseek-v4-pro` are *listed* by NVIDIA but never serve on this
+  account (60s and 240s with no first token; an 8B model on the same key answers
+  in 0.6s). Defaults were chosen by benchmarking. The client carries a fallback
+  chain so an unserved model degrades instead of failing the run.
+- **Never gate on a model's free integer.** Identical prompt, four runs:
+  `[92, 88, 0, 90]` and `[9, 8, 88, 8]`. Categorical fields were correct every
+  time. `ScoreVerdict` carries a `fit_band` enum and the pipeline thresholds on a
+  band-derived `effective_score`. The model's `should_apply` is advisory only —
+  it was observed inverted ("skip" on an 88).
+- **No sampling parameters anywhere.** Rejected with a 400 on Claude Sonnet 5;
+  omitted on NIM for consistency. Structure comes from the schema.
 - **The gate takes an optional `target_company`.** Naming the company you are
   applying *to* is not an employment claim; without this every honest summary
   burned all three retries. Found by running the pipeline, not by review.
+- **Embedding inputs are truncated to ~1600 chars.** `nv-embedqa-e5-v5` rejects
+  anything over 512 tokens and rejects the *whole batch*, so a batch failure now
+  falls back to per-item. Before this, 136 of 11,144 jobs embedded.
+- **Naukri and Cutshort are out of scope permanently.** No third-party API
+  exists, so they would require scraping (non-negotiable #1).
 - **Tailwind v4**: `@theme` tokens generate utilities (`bg-accent`). The v3
   `bg-[--color-accent]` form silently emits nothing.
 - Postgres is local via Homebrew, not Docker — Docker is not installed here.
