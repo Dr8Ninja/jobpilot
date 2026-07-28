@@ -6,6 +6,7 @@ K to the LLM. This is what keeps scoring cost proportional to relevance rather
 than to how many boards were pulled.
 """
 
+import datetime as dt
 import logging
 from dataclasses import dataclass
 
@@ -110,9 +111,15 @@ def prefilter(
         select(Job, distance.label("distance"))
         .join(JobEmbedding, JobEmbedding.job_id == Job.id)
         .where(Job.superseded_by.is_(None))
-        .order_by(distance)
-        .limit(top_k + len(exclude_job_ids or ()))
     )
+
+    # Freshness. A four-month-old posting is usually filled or stale, and it
+    # crowds out live ones. Undated rows are excluded rather than assumed fresh.
+    if settings.max_posting_age_days > 0:
+        cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=settings.max_posting_age_days)
+        statement = statement.where(Job.posted_at.is_not(None), Job.posted_at >= cutoff)
+
+    statement = statement.order_by(distance).limit(top_k + len(exclude_job_ids or ()))
 
     results: list[Candidate] = []
     for job, dist in session.execute(statement):

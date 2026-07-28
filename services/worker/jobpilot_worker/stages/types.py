@@ -4,6 +4,7 @@ Deliberately plain dataclasses rather than ORM rows: discovery and resolution ca
 be tested without a database, and `ingest` is the single place that touches one.
 """
 
+import datetime as dt
 import hashlib
 import html
 import re
@@ -47,6 +48,9 @@ class RawJob:
     apply_url: str
     salary: str | None = None
     ats_provider: str = "greenhouse"
+    #: When the employer published/updated the posting. None when the provider
+    #: does not expose one — those are treated as unknown-age, not as fresh.
+    posted_at: dt.datetime | None = None
 
     @property
     def hash(self) -> str:
@@ -64,6 +68,7 @@ class RawListing:
     snippet: str
     redirect_url: str
     salary: str | None = None
+    posted_at: dt.datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -98,3 +103,32 @@ class ResolvedListing:
     @property
     def hash(self) -> str:
         return content_hash(self.listing.title, self.listing.location or "", self.description)
+
+
+def parse_timestamp(value: object) -> dt.datetime | None:
+    """Best-effort ISO-8601 / epoch parse across eight different providers.
+
+    Returns None rather than guessing. A None age is never treated as fresh —
+    an undated posting is shown only when the freshness filter is off.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, int | float):
+        try:
+            return dt.datetime.fromtimestamp(float(value), tz=dt.UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(value).strip()
+    if text.isdigit():
+        try:
+            return dt.datetime.fromtimestamp(int(text), tz=dt.UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = text.replace("Z", "+00:00")
+    for candidate in (text, text.split("T")[0], text.split(" ")[0]):
+        try:
+            parsed = dt.datetime.fromisoformat(candidate)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
+        except ValueError:
+            continue
+    return None

@@ -28,13 +28,32 @@ An automated fact-check runs on your output and rejects violations, so inventing
 anything wastes the attempt. When in doubt, stay closer to the original bullet.
 """
 
-SCORING_SYSTEM = """\
+SCORING_SYSTEM_TEMPLATE = """\
 You score how well one candidate matches one job description.
 
 Be calibrated and honest: a high score should mean the candidate would plausibly
-clear a recruiter screen. Penalise seniority mismatch heavily — a role wanting 8+
-years is a mismatch for a candidate with under 2, regardless of skill overlap.
+clear a recruiter screen.
+
+On seniority, the candidate is deliberately willing to stretch:
+- A role asking for up to {max_years} years of experience is a REAL opportunity.
+  Mark seniority_fit 'good' when the requirement is at or below their experience,
+  and 'stretch' when it is above but still within {max_years} years. A stretch is
+  worth applying to — do not mark it 'mismatch' and do not tank the band for it.
+- Reserve 'mismatch' for roles that are genuinely out of range: more than
+  {max_years} years required, or a staff/principal/director-level scope, or a
+  different discipline entirely.
+
+Judge skills and domain fit on their own merits; do not let a 3-5 year
+requirement drag an otherwise strong technical match down to 'weak'.
 """
+
+
+def build_scoring_system(max_years: int) -> str:
+    return SCORING_SYSTEM_TEMPLATE.format(max_years=max_years)
+
+
+#: Back-compat for callers that want the default window.
+SCORING_SYSTEM = SCORING_SYSTEM_TEMPLATE.format(max_years=5)
 
 
 def _facts_json(facts: CanonicalFacts) -> str:

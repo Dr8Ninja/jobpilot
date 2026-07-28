@@ -14,10 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from jobpilot_shared.db.models import Application, Company, Event, Job, Score, TailoringRun
 from jobpilot_shared.db.session import get_session_factory
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from .schemas import BulletDiff, GateNote, QueueCard, QueueDetail
+from .schemas import BulletDiff, GateNote, QueueCard, QueueDetail, StatusCount
 
 app = FastAPI(title="JobPilot", version="0.1.0")
 
@@ -66,6 +66,15 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/queue/counts", response_model=list[StatusCount])
+def queue_counts(db: Session = Depends(get_db)):
+    """Per-status totals, so the dashboard can show tabs without fetching everything."""
+    rows = db.execute(
+        select(Application.status, func.count(Application.id)).group_by(Application.status)
+    ).all()
+    return [StatusCount(status=status, count=count) for status, count in rows]
+
+
 @app.get("/api/queue", response_model=list[QueueCard])
 def list_queue(status: str | None = None, db: Session = Depends(get_db)):
     statement = (
@@ -96,6 +105,7 @@ def list_queue(status: str | None = None, db: Session = Depends(get_db)):
                 apply_url=job.apply_url,
                 has_pdf=bool(run and run.pdf_path),
                 warning_count=len((run.gate_warnings or []) if run else []),
+                posted_at=job.posted_at,
                 created_at=application.created_at,
             )
         )
@@ -155,6 +165,7 @@ def get_card(application_id: int, db: Session = Depends(get_db)):
         rejections=_notes(run.gate_rejections if run else None),
         attempts=run.attempt if run else 0,
         has_pdf=bool(run and run.pdf_path),
+        posted_at=job.posted_at,
     )
 
 
@@ -185,6 +196,7 @@ def _transition(db: Session, application_id: int, status: str, *, require_gate: 
             )
 
     now = dt.datetime.now(dt.UTC)
+    previous = application.status
     application.status = status
     if status == "approved":
         application.approved_at = now
@@ -198,7 +210,7 @@ def _transition(db: Session, application_id: int, status: str, *, require_gate: 
             application_id=application.id,
             job_id=application.job_id,
             type=f"application.{status}",
-            payload={"at": now.isoformat()},
+            payload={"at": now.isoformat(), "from": previous},
         )
     )
     db.flush()
@@ -222,6 +234,16 @@ def mark_applied(application_id: int, db: Session = Depends(get_db)):
     These events are the substrate the response-rate baseline is computed from.
     """
     return _transition(db, application_id, "applied", require_gate=True)
+
+
+@app.post("/api/queue/{application_id}/restore")
+def restore(application_id: int, db: Session = Depends(get_db)):
+    """Move a rejected or needs-human card back into the queue.
+
+    Nothing is ever deleted — rejecting is reversible, so a card dismissed in
+    haste can always be brought back.
+    """
+    return _transition(db, application_id, "queued", require_gate=False)
 
 
 @app.get("/api/queue/{application_id}/pdf")

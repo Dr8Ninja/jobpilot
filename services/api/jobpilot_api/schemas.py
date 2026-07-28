@@ -29,6 +29,8 @@ class QueueCard(BaseModel):
     apply_url: str
     has_pdf: bool
     warning_count: int
+    #: When the employer published it. None when the provider exposes no date.
+    posted_at: datetime | None
     created_at: datetime
 
 
@@ -69,3 +71,9 @@ class QueueDetail(BaseModel):
     rejections: list[GateNote]
     attempts: int
     has_pdf: bool
+    posted_at: datetime | None
+
+
+class StatusCount(BaseModel):
+    status: str
+    count: int

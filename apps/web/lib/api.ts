@@ -12,6 +12,7 @@ export type QueueCard = {
   apply_url: string;
   has_pdf: boolean;
   warning_count: number;
+  posted_at: string | null;
   created_at: string;
 };
 
@@ -56,7 +57,10 @@ export type QueueDetail = {
   rejections: GateNote[];
   attempts: number;
   has_pdf: boolean;
+  posted_at: string | null;
 };
+
+export type StatusCount = { status: string; count: number };
 
 const BASE = process.env.JOBPILOT_API_URL ?? "http://127.0.0.1:8000";
 
@@ -69,5 +73,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export const getQueue = () => request<QueueCard[]>("/api/queue");
+export const getQueue = (status?: string) =>
+  request<QueueCard[]>(`/api/queue${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+export const getCounts = () => request<StatusCount[]>("/api/queue/counts");
+
+/** Human-readable posting age. Undated postings say so rather than guessing. */
+export function postedAge(iso: string | null): string {
+  if (!iso) return "date unknown";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day ago";
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  return months === 1 ? "1 month ago" : `${months} months ago`;
+}
 export const getCard = (id: number) => request<QueueDetail>(`/api/queue/${id}`);

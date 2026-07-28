@@ -17,7 +17,7 @@ import httpx
 from jobpilot_shared.settings import get_settings
 
 from ..clients.http import BotCheckEncountered, fetch
-from .types import RawListing
+from .types import RawListing, parse_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +93,7 @@ def search(
                     snippet=(entry.get("description") or "").strip(),
                     redirect_url=entry.get("redirect_url", ""),
                     salary=_salary(entry),
+                    posted_at=parse_timestamp(entry.get("created")),
                 )
             )
         except (KeyError, TypeError) as exc:

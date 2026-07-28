@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import httpx
 
 from ..clients.http import BotCheckEncountered, fetch
-from .types import RawListing, html_to_text
+from .types import RawListing, html_to_text, parse_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +54,7 @@ def _parse_remotive(payload: dict) -> list[RawListing]:
                 snippet=html_to_text(entry.get("description", "")),
                 redirect_url=entry.get("url", ""),
                 salary=_salary(entry.get("salary")),
+                posted_at=parse_timestamp(entry.get("publication_date")),
             )
         )
     return out
@@ -70,6 +71,7 @@ def _parse_arbeitnow(payload: dict) -> list[RawListing]:
                 location=entry.get("location") or ("Remote" if entry.get("remote") else None),
                 snippet=html_to_text(entry.get("description", "")),
                 redirect_url=entry.get("url", ""),
+                posted_at=parse_timestamp(entry.get("created_at")),
             )
         )
     return out
@@ -94,6 +96,7 @@ def _parse_remoteok(payload: list) -> list[RawListing]:
                     if entry.get("salary_min")
                     else None
                 ),
+                posted_at=parse_timestamp(entry.get("date") or entry.get("epoch")),
             )
         )
     return out

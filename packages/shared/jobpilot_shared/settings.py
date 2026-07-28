@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     )
     embed_top_k: int = Field(default=40, validation_alias=_jobpilot("embed_top_k"))
 
+    #: Only postings published within this many days reach the queue. 0 disables
+    #: the filter. Rows whose provider exposes no date are excluded when it is on
+    #: — an undated posting is unknown-age, not fresh.
+    max_posting_age_days: int = Field(
+        default=30, validation_alias=_jobpilot("max_posting_age_days")
+    )
+    #: Roles asking for up to this many years still count as a real opportunity.
+    #: This does NOT change what the resume claims — canonical_facts.experience_years
+    #: remains the hard honesty ceiling the whitelist gate enforces.
+    max_years_required: int = Field(default=5, validation_alias=_jobpilot("max_years_required"))
+
     # "nvidia" (OpenAI-compatible NIM) or "anthropic".
     llm_provider: str = Field(default="nvidia", validation_alias=_jobpilot("llm_provider"))
     nvidia_api_key: str = ""

@@ -14,7 +14,7 @@ from jobpilot_shared.settings import get_settings
 from sqlalchemy.orm import Session
 
 from ..clients.llm import LLMClient, LLMParseError, LLMRefusal
-from ..prompts import SCORING_SYSTEM, build_scoring_prompt
+from ..prompts import build_scoring_prompt, build_scoring_system
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def score_job(facts: CanonicalFacts, job: Job, client: LLMClient) -> ScoreVerdic
     return client.parse(
         model=settings.scoring_model,
         max_tokens=settings.scoring_max_tokens,
-        system=SCORING_SYSTEM,
+        system=build_scoring_system(settings.max_years_required),
         prompt=build_scoring_prompt(
             facts, job.title, job.company.name if job.company else "", job.description
         ),
@@ -80,6 +80,8 @@ def select_for_tailoring(scores: list[Score]) -> list[Score]:
         verdict = row.verdict or {}
         if row.match_score < settings.match_score_threshold:
             continue
+        # 'stretch' is explicitly kept: the user asked to see roles requiring up
+        # to max_years_required. Only a true mismatch is dropped.
         if verdict.get("seniority_fit") == "mismatch":
             continue
         if verdict.get("should_apply") is False:

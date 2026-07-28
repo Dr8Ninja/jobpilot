@@ -20,7 +20,7 @@ export function Actions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function act(action: "approve" | "reject" | "applied") {
+  async function act(action: "approve" | "reject" | "applied" | "restore") {
     setBusy(true);
     setError(null);
     try {
@@ -57,13 +57,25 @@ export function Actions({
         >
           Approve
         </button>
-        <button
-          className={`${base} border-rule bg-white hover:bg-[#f2f0ec]`}
-          disabled={busy || status === "rejected"}
-          onClick={() => act("reject")}
-        >
-          Reject
-        </button>
+        {status === "rejected" || status === "needs_human" ? (
+          <button
+            className={`${base} border-rule bg-white hover:bg-[#f2f0ec]`}
+            disabled={busy}
+            onClick={() => act("restore")}
+            title="Move this back into the review queue"
+          >
+            Restore to queue
+          </button>
+        ) : (
+          <button
+            className={`${base} border-rule bg-white hover:bg-[#f2f0ec]`}
+            disabled={busy}
+            onClick={() => act("reject")}
+            title="Moves to the Rejected tab. Nothing is deleted — you can restore it."
+          >
+            Reject
+          </button>
+        )}
 
         {hasPdf && whitelistPassed && (
           <a

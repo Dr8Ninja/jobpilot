@@ -117,11 +117,18 @@ def ingest_ats_job(session: Session, raw: RawJob) -> IngestReport:
 
     existing = _existing_by_source(session, raw.ats_provider, raw.ats_job_id)
     if existing is not None:
+        # Backfill a missing publish date even when nothing else changed —
+        # otherwise rows discovered before posted_at existed stay undated
+        # forever and the freshness filter hides them permanently.
+        if existing.posted_at is None and raw.posted_at is not None:
+            existing.posted_at = raw.posted_at
+            report.updated += 1
         if existing.content_hash != raw.hash:
             existing.title = raw.title
             existing.location = raw.location
             existing.description = raw.description
             existing.apply_url = raw.apply_url
+            existing.posted_at = raw.posted_at or existing.posted_at
             existing.content_hash = raw.hash
             report.updated += 1
         else:
@@ -146,6 +153,7 @@ def ingest_ats_job(session: Session, raw: RawJob) -> IngestReport:
         apply_url=raw.apply_url,
         description_quality="full",
         salary=raw.salary,
+        posted_at=raw.posted_at,
         content_hash=raw.hash,
     )
     session.add(job)
@@ -186,7 +194,11 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
 
     existing = _existing_by_source(session, "adzuna", listing.external_id)
     if existing is not None:
-        report.skipped += 1
+        if existing.posted_at is None and listing.posted_at is not None:
+            existing.posted_at = listing.posted_at
+            report.updated += 1
+        else:
+            report.skipped += 1
         return report
 
     # THE CERTAINTY RULE. Drop this row only when a Greenhouse job id proves it is
@@ -224,6 +236,7 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
         resolved_url=resolved.resolved_url,
         description_quality=resolved.description_quality,
         salary=listing.salary,
+        posted_at=listing.posted_at,
         content_hash=resolved.hash,
     )
     session.add(job)
@@ -242,8 +255,13 @@ def ingest_remote_listing(session: Session, source: str, listing: "RawListing") 
     report = IngestReport()
     company = upsert_company(session, listing.company_name, discovered_via="aggregator")
 
-    if _existing_by_source(session, source, listing.external_id) is not None:
-        report.skipped += 1
+    existing = _existing_by_source(session, source, listing.external_id)
+    if existing is not None:
+        if existing.posted_at is None and listing.posted_at is not None:
+            existing.posted_at = listing.posted_at
+            report.updated += 1
+        else:
+            report.skipped += 1
         return report
 
     session.add(
@@ -258,6 +276,7 @@ def ingest_remote_listing(session: Session, source: str, listing: "RawListing") 
             apply_url=listing.redirect_url,
             description_quality="full",
             salary=listing.salary,
+            posted_at=listing.posted_at,
             content_hash=content_hash(listing.title, listing.location or "", listing.snippet),
         )
     )

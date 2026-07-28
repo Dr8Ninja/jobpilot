@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Actions } from "@/components/Actions";
 import { Badge, ScorePill, StatusBadge } from "@/components/Badges";
 import { DiffBullet } from "@/components/Diff";
-import { getCard } from "@/lib/api";
+import { getCard, postedAge } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +39,10 @@ export default async function CardPage({
           <span>{card.location ?? "Location not stated"}</span>
           <span aria-hidden>·</span>
           <span>{card.salary ?? "Salary not disclosed"}</span>
+          <span aria-hidden>·</span>
+          <span title={card.posted_at ?? "no date from provider"}>
+            posted {postedAge(card.posted_at)}
+          </span>
           <Badge>{card.source}</Badge>
           {card.description_quality === "thin" && <Badge tone="warn">thin JD</Badge>}
           {card.seniority_fit && <Badge>{card.seniority_fit} fit</Badge>}

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import httpx
 
 from ..clients.http import BotCheckEncountered, fetch
-from .types import RawJob, html_to_text
+from .types import RawJob, html_to_text, parse_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ def _parse_greenhouse(payload: dict, token: str, company: str) -> list[RawJob]:
                 description=_text(entry.get("content")),
                 apply_url=entry.get("absolute_url", ""),
                 ats_provider="greenhouse",
+                posted_at=parse_timestamp(entry.get("first_published") or entry.get("updated_at")),
             )
         )
     return jobs
@@ -86,6 +87,10 @@ def _parse_lever(payload: list, token: str, company: str) -> list[RawJob]:
                 description=_text("".join(body)),
                 apply_url=entry.get("hostedUrl") or entry.get("applyUrl", ""),
                 ats_provider="lever",
+                # Lever's createdAt is epoch milliseconds.
+                posted_at=parse_timestamp(
+                    (entry.get("createdAt") or 0) / 1000 or entry.get("createdAt")
+                ),
             )
         )
     return jobs
@@ -107,6 +112,7 @@ def _parse_ashby(payload: dict, token: str, company: str) -> list[RawJob]:
                 apply_url=entry.get("applyUrl") or entry.get("jobUrl", ""),
                 salary=summary,
                 ats_provider="ashby",
+                posted_at=parse_timestamp(entry.get("publishedAt") or entry.get("updatedAt")),
             )
         )
     return jobs
@@ -130,6 +136,7 @@ def _parse_workable(payload: dict, token: str, company: str) -> list[RawJob]:
                 ),
                 apply_url=entry.get("application_url") or entry.get("url", ""),
                 ats_provider="workable",
+                posted_at=parse_timestamp(entry.get("published_on") or entry.get("created_at")),
             )
         )
     return jobs
@@ -161,6 +168,7 @@ def _parse_smartrecruiters(payload: dict, token: str, company: str) -> list[RawJ
                 ),
                 apply_url=f"https://jobs.smartrecruiters.com/{token}/{entry['id']}",
                 ats_provider="smartrecruiters",
+                posted_at=parse_timestamp(entry.get("releasedDate") or entry.get("createdOn")),
             )
         )
     return jobs

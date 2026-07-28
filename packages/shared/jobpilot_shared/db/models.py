@@ -157,6 +157,13 @@ class Job(Base):
     #: Sparse by design — most ATS payloads omit it. Never an input to scoring.
     salary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    #: When the employer published the posting, per the provider. NULL when the
+    #: provider exposes no date — such rows are excluded by the freshness filter
+    #: rather than assumed fresh.
+    posted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
     content_hash: Mapped[str] = mapped_column(String(64))
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

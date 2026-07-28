@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { Badge, ScorePill, StatusBadge } from "@/components/Badges";
-import { getQueue, type QueueCard } from "@/lib/api";
+import { Tabs } from "@/components/Tabs";
+import {
+  getCounts,
+  getQueue,
+  postedAge,
+  type QueueCard,
+  type StatusCount,
+} from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -20,10 +27,12 @@ function Row({ card }: { card: QueueCard }) {
           <span>{card.location ?? "Location not stated"}</span>
           <span aria-hidden>·</span>
           <span>{card.salary ?? "—"}</span>
+          <span aria-hidden>·</span>
+          <span title={card.posted_at ?? "no date from provider"}>
+            posted {postedAge(card.posted_at)}
+          </span>
           <Badge>{card.source}</Badge>
-          {card.description_quality === "thin" && (
-            <Badge tone="warn" >thin JD</Badge>
-          )}
+          {card.description_quality === "thin" && <Badge tone="warn">thin JD</Badge>}
           {card.warning_count > 0 && (
             <Badge tone="warn">
               {card.warning_count} flag{card.warning_count === 1 ? "" : "s"}
@@ -40,38 +49,59 @@ function Row({ card }: { card: QueueCard }) {
   );
 }
 
-export default async function QueuePage() {
+const EMPTY_COPY: Record<string, string> = {
+  queued: "Nothing waiting on you. Run `jobpilot run-pipeline` to find more.",
+  approved: "Nothing approved yet.",
+  applied: "Nothing marked as applied yet.",
+  needs_human: "Nothing needs attention — every tailored resume passed the fact-check.",
+  rejected: "Nothing rejected. Anything you reject lands here and can be restored.",
+};
+
+export default async function QueuePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
+  const { status = "queued" } = await searchParams;
+  const active = status === "all" ? "" : status;
+
   let cards: QueueCard[] = [];
+  let counts: StatusCount[] = [];
   let error: string | null = null;
   try {
-    cards = await getQueue();
+    [cards, counts] = await Promise.all([
+      getQueue(active || undefined),
+      getCounts(),
+    ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not reach the API";
   }
 
   return (
     <div>
-      <div className="mb-6 flex items-baseline justify-between">
+      <div className="mb-4 flex items-baseline justify-between">
         <h1 className="text-[22px] font-semibold tracking-tight">Review queue</h1>
         <span className="text-[13px] text-muted">
           {cards.length} application{cards.length === 1 ? "" : "s"}
         </span>
       </div>
 
+      <Tabs active={active} counts={counts} />
+
       {error && (
-        <p className="rounded border border-[#8a2222]/25 bg-removed px-4 py-3 text-[14px]">
-          {error}. Is the API running? <code className="font-mono">uv run uvicorn
-          jobpilot_api.main:app --reload</code>
+        <p className="mt-4 rounded border border-[#8a2222]/25 bg-removed px-4 py-3 text-[14px]">
+          {error}. Is the API running?{" "}
+          <code className="font-mono">uv run uvicorn jobpilot_api.main:app --reload</code>
         </p>
       )}
 
       {!error && cards.length === 0 && (
-        <p className="text-[14px] text-muted">
-          Nothing queued. Run <code className="font-mono">jobpilot run-pipeline</code>.
+        <p className="mt-6 text-[14px] text-muted">
+          {EMPTY_COPY[active] ?? "Nothing here yet."}
         </p>
       )}
 
-      <div className="border-t border-rule">
+      <div>
         {cards.map((card) => (
           <Row key={card.application_id} card={card} />
         ))}
