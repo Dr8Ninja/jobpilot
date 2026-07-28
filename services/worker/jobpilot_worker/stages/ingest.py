@@ -17,7 +17,7 @@ from jobpilot_shared.db.models import Company, Event, Job
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .types import RawJob, ResolvedListing
+from .types import RawJob, RawListing, ResolvedListing, content_hash
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def _existing_by_source(session: Session, source: str, external_id: str) -> Job 
     return session.scalar(select(Job).where(Job.source == source, Job.external_id == external_id))
 
 
-def ingest_greenhouse_job(session: Session, raw: RawJob) -> IngestReport:
+def ingest_ats_job(session: Session, raw: RawJob) -> IngestReport:
     report = IngestReport()
     company = upsert_company(
         session,
@@ -115,7 +115,7 @@ def ingest_greenhouse_job(session: Session, raw: RawJob) -> IngestReport:
         discovered_via="seed",
     )
 
-    existing = _existing_by_source(session, "greenhouse", raw.ats_job_id)
+    existing = _existing_by_source(session, raw.ats_provider, raw.ats_job_id)
     if existing is not None:
         if existing.content_hash != raw.hash:
             existing.title = raw.title
@@ -137,7 +137,7 @@ def ingest_greenhouse_job(session: Session, raw: RawJob) -> IngestReport:
 
     job = Job(
         company_id=company.id,
-        source="greenhouse",
+        source=raw.ats_provider,
         external_id=raw.ats_job_id,
         ats_job_id=raw.ats_job_id,
         title=raw.title,
@@ -160,7 +160,9 @@ def ingest_greenhouse_job(session: Session, raw: RawJob) -> IngestReport:
                 type="job.superseded",
                 payload={
                     "superseded_job_id": loser.id,
-                    "reason": "greenhouse row replaces aggregator row with same ats_job_id",
+                    "reason": (
+                        f"{raw.ats_provider} row replaces aggregator row with same ats_job_id"
+                    ),
                 },
             )
         )
@@ -182,7 +184,7 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
         discovered_via="aggregator",
     )
 
-    existing = _existing_by_source(session, "aggregator", listing.external_id)
+    existing = _existing_by_source(session, "adzuna", listing.external_id)
     if existing is not None:
         report.skipped += 1
         return report
@@ -212,7 +214,7 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
 
     job = Job(
         company_id=company.id,
-        source="aggregator",
+        source="adzuna",
         external_id=listing.external_id,
         ats_job_id=resolved.ats_job_id,
         title=listing.title,
@@ -225,6 +227,40 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
         content_hash=resolved.hash,
     )
     session.add(job)
+    session.flush()
+    report.inserted += 1
+    return report
+
+
+def ingest_remote_listing(session: Session, source: str, listing: "RawListing") -> IngestReport:
+    """Insert a row from a keyless remote board.
+
+    These carry full descriptions, so unlike an aggregator snippet they are
+    `description_quality='full'` and compete with ATS rows on equal footing.
+    They have no ATS job id, so they never participate in certainty dedupe.
+    """
+    report = IngestReport()
+    company = upsert_company(session, listing.company_name, discovered_via="aggregator")
+
+    if _existing_by_source(session, source, listing.external_id) is not None:
+        report.skipped += 1
+        return report
+
+    session.add(
+        Job(
+            company_id=company.id,
+            source=source,
+            external_id=listing.external_id,
+            ats_job_id=None,
+            title=listing.title,
+            location=listing.location,
+            description=listing.snippet,
+            apply_url=listing.redirect_url,
+            description_quality="full",
+            salary=listing.salary,
+            content_hash=content_hash(listing.title, listing.location or "", listing.snippet),
+        )
+    )
     session.flush()
     report.inserted += 1
     return report

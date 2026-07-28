@@ -15,6 +15,10 @@ RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 #: Statuses that mean "a human should look at this", not "try again differently".
 HANDOFF_STATUS = frozenset({401, 403, 405, 407, 451})
 
+#: We identify ourselves honestly. This is not fingerprint spoofing — several
+#: public APIs (RemoteOK) reject a blank UA, and a truthful one is the correct fix.
+USER_AGENT = "JobPilot/0.1 (personal job-search assistant; +https://github.com/Dr8Ninja)"
+
 _BOT_CHECK_MARKERS = (
     "captcha",
     "are you a robot",
@@ -77,12 +81,21 @@ def fetch(
     network and 5xx/429 conditions.
     """
     owns_client = client is None
-    client = client or httpx.Client(follow_redirects=follow_redirects, timeout=timeout)
+    client = client or httpx.Client(
+        follow_redirects=follow_redirects,
+        timeout=timeout,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+    )
     try:
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                response = client.get(url, follow_redirects=follow_redirects, timeout=timeout)
+                response = client.get(
+                    url,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    headers={"User-Agent": USER_AGENT},
+                )
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt == max_attempts:

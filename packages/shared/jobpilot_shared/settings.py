@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     #: nv-embedqa-e5-v5 and voyage-3 are both 1024-wide, so the two providers are
     #: interchangeable without a migration or a reindex.
     embedding_dimensions: int = 1024
+    #: nv-embedqa-e5-v5 hard-caps at 512 tokens; ~1600 chars keeps a safety margin.
+    embedding_char_budget: int = Field(
+        default=1600, validation_alias=_jobpilot("embedding_char_budget")
+    )
+
+    #: Keyless public remote boards pulled every run.
+    remote_boards: str = Field(
+        default="remotive,arbeitnow,remoteok", validation_alias=_jobpilot("remote_boards")
+    )
+
+    def remote_boards_list(self) -> list[str]:
+        return [b.strip() for b in self.remote_boards.split(",") if b.strip()]
 
     def llm_fallback_models_list(self) -> list[str]:
         return [m.strip() for m in self.llm_fallback_models.split(",") if m.strip()]

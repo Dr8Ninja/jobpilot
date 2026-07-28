@@ -1,24 +1,391 @@
-# Greenhouse board registry seed.
+# Verified job-board registry.
 #
-# Each entry maps a company to its public Greenhouse board token — the `{token}`
-# in https://boards.greenhouse.io/{token}. Find it by opening a company's careers
-# page and reading the URL.
+# Every token below was probed against its provider's public API on 2026-07-26 and returned at least one live posting. Nothing here is guessed.
 #
-# VERIFY BEFORE RELYING ON THESE. Board tokens change and companies migrate
-# between ATS vendors; a stale token is logged and skipped, it does not break the
-# run. Add your own targets here — this file is the whole registry until the
-# aggregator starts growing it.
+# Providers are all documented, public, unauthenticated JSON endpoints:
+#   greenhouse       boards-api.greenhouse.io
+#   lever            api.lever.co
+#   ashby            api.ashbyhq.com/posting-api
+#   workable         apply.workable.com/api/v1/widget
+#   smartrecruiters  api.smartrecruiters.com
 #
-# `jobpilot seed-companies infra/seed_companies.yaml` loads it (idempotent).
+# Tokens go stale as companies migrate ATS vendors. A dead token is logged and
+# skipped, never fatal. Re-probe periodically and prune.
+#
+# Load with: jobpilot seed-companies infra/seed_companies.yaml   (idempotent)
 
 companies:
-  # Demo entry. Matches the recorded fixtures so `JOBPILOT_FIXTURE_MODE=1
-  # jobpilot run-pipeline` produces a populated queue out of the box.
-  # Replace it with your real targets.
-  - name: Acme Corp
-    board_token: acme
+  - name: Databricks
+    board_token: databricks
     ats_provider: greenhouse
+    # 800 postings at seed time
 
-  # - name: Some Startup
-  #   board_token: somestartup
-  #   ats_provider: greenhouse
+  - name: OpenAI
+    board_token: openai
+    ats_provider: ashby
+    # 753 postings at seed time
+
+  - name: Stripe
+    board_token: stripe
+    ats_provider: greenhouse
+    # 536 postings at seed time
+
+  - name: Anthropic
+    board_token: anthropic
+    ats_provider: greenhouse
+    # 418 postings at seed time
+
+  - name: Datadog
+    board_token: datadog
+    ats_provider: greenhouse
+    # 418 postings at seed time
+
+  - name: Waymo
+    board_token: waymo
+    ats_provider: greenhouse
+    # 405 postings at seed time
+
+  - name: MongoDB
+    board_token: mongodb
+    ats_provider: greenhouse
+    # 401 postings at seed time
+
+  - name: Okta
+    board_token: okta
+    ats_provider: greenhouse
+    # 352 postings at seed time
+
+  - name: Harvey
+    board_token: harvey
+    ats_provider: ashby
+    # 349 postings at seed time
+
+  - name: Samsara
+    board_token: samsara
+    ats_provider: greenhouse
+    # 326 postings at seed time
+
+  - name: Palantir
+    board_token: palantir
+    ats_provider: lever
+    # 287 postings at seed time
+
+  - name: Brex
+    board_token: brex
+    ats_provider: greenhouse
+    # 279 postings at seed time
+
+  - name: Cloudflare
+    board_token: cloudflare
+    ats_provider: greenhouse
+    # 271 postings at seed time
+
+  - name: Paytm
+    board_token: paytm
+    ats_provider: lever
+    # 230 postings at seed time
+
+  - name: Elastic
+    board_token: elastic
+    ats_provider: greenhouse
+    # 204 postings at seed time
+
+  - name: Scale AI
+    board_token: scaleai
+    ats_provider: greenhouse
+    # 204 postings at seed time
+
+  - name: Pinterest
+    board_token: pinterest
+    ats_provider: greenhouse
+    # 202 postings at seed time
+
+  - name: Airbnb
+    board_token: airbnb
+    ats_provider: greenhouse
+    # 196 postings at seed time
+
+  - name: Reddit
+    board_token: reddit
+    ats_provider: greenhouse
+    # 194 postings at seed time
+
+  - name: GitLab
+    board_token: gitlab
+    ats_provider: greenhouse
+    # 187 postings at seed time
+
+  - name: Twilio
+    board_token: twilio
+    ats_provider: greenhouse
+    # 183 postings at seed time
+
+  - name: Affirm
+    board_token: affirm
+    ats_provider: greenhouse
+    # 174 postings at seed time
+
+  - name: Figma
+    board_token: figma
+    ats_provider: greenhouse
+    # 174 postings at seed time
+
+  - name: ClickHouse
+    board_token: clickhouse
+    ats_provider: ashby
+    # 171 postings at seed time
+
+  - name: Sierra
+    board_token: sierra
+    ats_provider: ashby
+    # 167 postings at seed time
+
+  - name: Coinbase
+    board_token: coinbase
+    ats_provider: greenhouse
+    # 156 postings at seed time
+
+  - name: Lyft
+    board_token: lyft
+    ats_provider: greenhouse
+    # 156 postings at seed time
+
+  - name: Flexport
+    board_token: flexport
+    ats_provider: greenhouse
+    # 150 postings at seed time
+
+  - name: Asana
+    board_token: asana
+    ats_provider: greenhouse
+    # 148 postings at seed time
+
+  - name: Instacart
+    board_token: instacart
+    ats_provider: greenhouse
+    # 122 postings at seed time
+
+  - name: Cursor
+    board_token: cursor
+    ats_provider: ashby
+    # 120 postings at seed time
+
+  - name: Robinhood
+    board_token: robinhood
+    ats_provider: greenhouse
+    # 119 postings at seed time
+
+  - name: Ramp
+    board_token: ramp
+    ats_provider: ashby
+    # 118 postings at seed time
+
+  - name: Postman
+    board_token: postman
+    ats_provider: greenhouse
+    # 114 postings at seed time
+
+  - name: Spotify
+    board_token: spotify
+    ats_provider: lever
+    # 108 postings at seed time
+
+  - name: Vanta
+    board_token: vanta
+    ats_provider: ashby
+    # 104 postings at seed time
+
+  - name: Nuro
+    board_token: nuro
+    ats_provider: greenhouse
+    # 99 postings at seed time
+
+  - name: Perplexity
+    board_token: perplexity
+    ats_provider: ashby
+    # 86 postings at seed time
+
+  - name: Vercel
+    board_token: vercel
+    ats_provider: greenhouse
+    # 78 postings at seed time
+
+  - name: Gusto
+    board_token: gusto
+    ats_provider: greenhouse
+    # 76 postings at seed time
+
+  - name: Chime
+    board_token: chime
+    ats_provider: greenhouse
+    # 67 postings at seed time
+
+  - name: Faire
+    board_token: faire
+    ats_provider: greenhouse
+    # 67 postings at seed time
+
+  - name: PhonePe
+    board_token: phonepe
+    ats_provider: greenhouse
+    # 61 postings at seed time
+
+  - name: Duolingo
+    board_token: duolingo
+    ats_provider: greenhouse
+    # 60 postings at seed time
+
+  - name: Vonage
+    board_token: vonage
+    ats_provider: greenhouse
+    # 59 postings at seed time
+
+  - name: Supabase
+    board_token: supabase
+    ats_provider: ashby
+    # 55 postings at seed time
+
+  - name: Writer
+    board_token: writer
+    ats_provider: ashby
+    # 55 postings at seed time
+
+  - name: Checkr
+    board_token: checkr
+    ats_provider: greenhouse
+    # 54 postings at seed time
+
+  - name: Ro
+    board_token: ro
+    ats_provider: lever
+    # 51 postings at seed time
+
+  - name: Discord
+    board_token: discord
+    ats_provider: greenhouse
+    # 50 postings at seed time
+
+  - name: Fastly
+    board_token: fastly
+    ats_provider: greenhouse
+    # 48 postings at seed time
+
+  - name: Abridge
+    board_token: abridge
+    ats_provider: ashby
+    # 44 postings at seed time
+
+  - name: Neo4j
+    board_token: neo4j
+    ats_provider: greenhouse
+    # 44 postings at seed time
+
+  - name: Slice
+    board_token: slice
+    ats_provider: greenhouse
+    # 44 postings at seed time
+
+  - name: Marqeta
+    board_token: marqeta
+    ats_provider: greenhouse
+    # 43 postings at seed time
+
+  - name: Airtable
+    board_token: airtable
+    ats_provider: greenhouse
+    # 38 postings at seed time
+
+  - name: JFrog
+    board_token: jfrog
+    ats_provider: greenhouse
+    # 34 postings at seed time
+
+  - name: Modal
+    board_token: modal
+    ats_provider: ashby
+    # 32 postings at seed time
+
+  - name: Cockroach Labs
+    board_token: cockroachlabs
+    ats_provider: greenhouse
+    # 32 postings at seed time
+
+  - name: Dropbox
+    board_token: dropbox
+    ats_provider: greenhouse
+    # 30 postings at seed time
+
+  - name: Bandwidth
+    board_token: bandwidth
+    ats_provider: greenhouse
+    # 29 postings at seed time
+
+  - name: Linear
+    board_token: linear
+    ats_provider: ashby
+    # 25 postings at seed time
+
+  - name: Sendbird
+    board_token: sendbird
+    ats_provider: greenhouse
+    # 17 postings at seed time
+
+  - name: Calendly
+    board_token: calendly
+    ats_provider: greenhouse
+    # 14 postings at seed time
+
+  - name: Groww
+    board_token: groww
+    ats_provider: greenhouse
+    # 11 postings at seed time
+
+  - name: PostHog
+    board_token: posthog
+    ats_provider: ashby
+    # 10 postings at seed time
+
+  - name: Resend
+    board_token: resend
+    ats_provider: ashby
+    # 9 postings at seed time
+
+  - name: Browserbase
+    board_token: browserbase
+    ats_provider: ashby
+    # 8 postings at seed time
+
+  - name: Railway
+    board_token: railway
+    ats_provider: ashby
+    # 8 postings at seed time
+
+  - name: CircleCI
+    board_token: circleci
+    ats_provider: greenhouse
+    # 8 postings at seed time
+
+  - name: Lattice
+    board_token: lattice
+    ats_provider: greenhouse
+    # 7 postings at seed time
+
+  - name: Netlify
+    board_token: netlify
+    ats_provider: greenhouse
+    # 4 postings at seed time
+
+  - name: Remote
+    board_token: remote
+    ats_provider: greenhouse
+    # 2 postings at seed time
+
+  - name: Visa
+    board_token: Visa
+    ats_provider: smartrecruiters
+    # 2 postings at seed time
+
+  - name: Orca
+    board_token: orca
+    ats_provider: greenhouse
+    # 1 postings at seed time

@@ -54,7 +54,7 @@ def test_certain_duplicate_is_blocked_by_the_database(db) -> None:
     db.add(_job(company, source="greenhouse", external_id="gh-1", ats_job_id="4012345"))
     db.flush()
 
-    db.add(_job(company, source="aggregator", external_id="adz-99", ats_job_id="4012345"))
+    db.add(_job(company, source="adzuna", external_id="adz-99", ats_job_id="4012345"))
     with pytest.raises(IntegrityError):
         db.flush()
 
@@ -67,7 +67,7 @@ def test_unresolved_aggregator_rows_coexist(db) -> None:
     """
     company = _company(db)
     for i in range(3):
-        db.add(_job(company, source="aggregator", external_id=f"adz-{i}", ats_job_id=None))
+        db.add(_job(company, source="adzuna", external_id=f"adz-{i}", ats_job_id=None))
     db.flush()
 
     assert db.query(Job).filter(Job.ats_job_id.is_(None)).count() == 3
@@ -119,7 +119,7 @@ def test_superseded_by_records_the_drop_instead_of_deleting(db) -> None:
     """Redundancy must stay measurable — we record, we do not delete."""
     company = _company(db)
     winner = _job(company, source="greenhouse", external_id="gh-1", ats_job_id="4012345")
-    loser = _job(company, source="aggregator", external_id="adz-99", ats_job_id=None)
+    loser = _job(company, source="adzuna", external_id="adz-99", ats_job_id=None)
     db.add_all([winner, loser])
     db.flush()
 

@@ -31,8 +31,21 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 EMBEDDING_DIMENSIONS = 1024  # voyage-3
 
-ATS_PROVIDERS = ("greenhouse", "lever", "ashby")
-JOB_SOURCES = ("greenhouse", "aggregator")
+#: Per-company ATS boards. All documented, public, unauthenticated JSON APIs.
+ATS_PROVIDERS = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters")
+#: Where a job row came from. ATS providers plus keyless remote boards and the
+#: paid aggregator. No entry here is ever populated by scraping.
+JOB_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workable",
+    "smartrecruiters",
+    "adzuna",
+    "remotive",
+    "arbeitnow",
+    "remoteok",
+)
 DESCRIPTION_QUALITIES = ("full", "thin")
 DISCOVERY_ORIGINS = ("seed", "aggregator")
 APPLICATION_STATUSES = (
@@ -92,7 +105,8 @@ class Company(Base):
             postgresql_where="board_token IS NOT NULL",
         ),
         CheckConstraint(
-            "ats_provider IS NULL OR ats_provider IN ('greenhouse', 'lever', 'ashby')",
+            "ats_provider IS NULL OR ats_provider IN "
+            "('greenhouse', 'lever', 'ashby', 'workable', 'smartrecruiters')",
             name="ck_companies_provider",
         ),
         _enum_check("discovered_via", DISCOVERY_ORIGINS, "ck_companies_discovered_via"),

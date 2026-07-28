@@ -34,8 +34,17 @@ def resume_text(facts: CanonicalFacts) -> str:
     return "\n".join(parts)
 
 
-def job_text(job: Job) -> str:
-    return f"{job.title}\n{job.location or ''}\n\n{job.description}"[:20000]
+def job_text(job: Job, char_budget: int | None = None) -> str:
+    """Text handed to the embedding model.
+
+    Embedding models have a hard input cap — `nv-embedqa-e5-v5` rejects anything
+    over 512 tokens outright, and a full JD is routinely 2-4x that. This is only
+    the cheap pre-filter, so truncation is fine: the title and the opening of the
+    description carry the signal, and the LLM scorer later reads the whole thing.
+    """
+    budget = char_budget or get_settings().embedding_char_budget
+    header = f"{job.title}\n{job.location or ''}\n\n"
+    return (header + job.description)[:budget]
 
 
 def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size: int = 32) -> int:
@@ -56,10 +65,20 @@ def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size:
         batch = pending[start : start + batch_size]
         try:
             vectors = client.embed([job_text(j) for j in batch], input_type="document")
-        except Exception as exc:  # one batch failing must not lose the rest
-            log.warning("Embedding batch failed: %s", exc)
-            continue
-        for job, vector in zip(batch, vectors, strict=True):
+            pairs = list(zip(batch, vectors, strict=True))
+        except Exception as exc:
+            # A batch is rejected wholesale if any single item is oversized, so
+            # fall back to per-item rather than losing 31 good jobs to one bad one.
+            log.warning("Embedding batch failed (%s); retrying individually", exc)
+            pairs = []
+            for job in batch:
+                try:
+                    vector = client.embed([job_text(job)], input_type="document")[0]
+                    pairs.append((job, vector))
+                except Exception as inner:
+                    log.warning("Could not embed job %s: %s", job.id, inner)
+
+        for job, vector in pairs:
             session.add(JobEmbedding(job_id=job.id, embedding=vector, model=model))
             embedded += 1
         session.flush()

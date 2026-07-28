@@ -46,10 +46,11 @@ Open <http://localhost:3000/queue>.
 
 ## Going live
 
-1. Copy `.env.example` to `.env` and fill in `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`,
-   and the Adzuna pair. Set `JOBPILOT_FIXTURE_MODE=0`.
-2. Replace the demo entry in `infra/seed_companies.yaml` with real Greenhouse
-   board tokens, then re-run `seed-companies`.
+1. Copy `.env.example` to `.env` and fill in `NVIDIA_API_KEY` and the Adzuna pair.
+   Set `JOBPILOT_FIXTURE_MODE=0`. Embeddings run on the same NVIDIA key, so no
+   second provider is needed.
+2. `infra/seed_companies.yaml` already carries 75 verified boards. Add your own
+   targets and re-run `seed-companies` (idempotent).
 3. Ingest your actual resume:
 
 ```bash
@@ -65,6 +66,35 @@ is checked against. Then:
 uv run jobpilot confirm-facts
 uv run jobpilot run-pipeline
 ```
+
+## Where jobs come from
+
+All documented, public JSON APIs. Nothing here is scraped.
+
+| Source | Type | Auth |
+|---|---|---|
+| Greenhouse, Lever, Ashby, Workable, SmartRecruiters | Per-company ATS boards | none |
+| Remotive, Arbeitnow, RemoteOK | Global/remote boards | none |
+| Adzuna | Aggregator (India + worldwide) | free API key |
+
+`infra/seed_companies.yaml` ships **75 verified board tokens** (~11k live postings).
+Every token was probed against its provider before being written to the file — none
+are guessed. Tokens go stale as companies switch ATS vendors; a dead one is logged
+and skipped, never fatal.
+
+### Naukri and Cutshort
+
+Not supported, deliberately. Neither publishes a third-party job-search API, so
+pulling listings from them would mean scraping their web UI — which
+`CLAUDE.md` non-negotiable #1 forbids, and which risks your account.
+
+If you want their coverage, the compliant options are:
+
+1. **Set up job alerts** on Naukri/Cutshort and apply to those manually. The
+   tailoring engine still helps: paste the JD and run tailoring against it.
+2. **Add the company's own ATS board** to `seed_companies.yaml`. Most Indian
+   startups posting on Cutshort also run Greenhouse, Lever, or Ashby — that is
+   the same job, from a documented source.
 
 ## The whitelist gate
 
@@ -114,6 +144,28 @@ Database tests need Postgres; they skip cleanly if it is unreachable.
 
 ## What Phase 0 deliberately does not do
 
-No browser automation, no answer bank, no edit-in-place, no Lever or Ashby, no
-response-rate analytics. Submission is manual — you click apply, then press
-"I applied" so the outcome is recorded for the baseline.
+No browser automation, no answer bank, no edit-in-place, no response-rate
+analytics. Submission is manual — you click apply, then press "I applied" so the
+outcome is recorded for the baseline.
+
+
+## Models
+
+Defaults were chosen by benchmarking the configured key, not by reputation:
+
+| Role | Model | Why |
+|---|---|---|
+| Scoring | `nvidia/nemotron-3-super-120b-a12b` | strict JSON in ~3s, correctly calibrated |
+| Tailoring | `openai/gpt-oss-120b` | strongest rewriting of the fast options |
+| Embeddings | `nvidia/nv-embedqa-e5-v5` | 1024-dim, same width as voyage-3 |
+
+`z-ai/glm-5.2` and `deepseek-ai/deepseek-v4-pro` are listed by NVIDIA but never
+returned a token on this account (60s and 240s timeouts, while an 8B model on the
+same key answered in 0.6s). Set `JOBPILOT_TAILORING_MODEL` / `JOBPILOT_SCORING_MODEL`
+in `.env` if that changes — the client is model-agnostic and carries a fallback chain.
+
+**Scores are band-derived.** Models proved unreliable at emitting a raw 0-100
+integer — on an identical prompt one returned `[92, 88, 0, 90]` and another
+`[9, 8, 88, 8]`, while their categorical judgments were correct every time. The
+model picks a `fit_band`, and the number the pipeline thresholds on is derived
+from that band in code.

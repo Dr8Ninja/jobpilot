@@ -18,7 +18,16 @@ from sqlalchemy.orm import Session
 
 from .clients.embeddings import EmbeddingClient, get_embedding_client
 from .clients.llm import LLMClient, get_llm_client
-from .stages import discover_aggregator, discover_greenhouse, embed, ingest, resolve, score, tailor
+from .stages import (
+    discover_aggregator,
+    discover_ats,
+    discover_remote,
+    embed,
+    ingest,
+    resolve,
+    score,
+    tailor,
+)
 from .stages.render import RenderFailed, render_pdf
 
 log = logging.getLogger(__name__)
@@ -71,29 +80,46 @@ def run_discovery(session: Session, report: PipelineReport) -> None:
         from .clients.http import fetch as fetch_fn
 
     boards = [
-        (c.board_token, c.name)
+        (c.ats_provider, c.board_token, c.name)
         for c in session.scalars(
             select(Company).where(
-                Company.board_token.is_not(None), Company.ats_provider == "greenhouse"
+                Company.board_token.is_not(None), Company.ats_provider.is_not(None)
             )
         )
     ]
-    for result in discover_greenhouse.discover_boards(boards, fetch_fn=fetch_fn):
+    for result in discover_ats.discover_boards(boards, fetch_fn=fetch_fn):
         report.boards_pulled += 1
         if not result.ok:
             report.board_failures += 1
-            report.notes.append(f"board {result.board_token}: {result.error}")
+            report.notes.append(f"{result.provider}/{result.board_token}: {result.error}")
             session.add(
                 Event(
                     type="discovery.board_failed",
-                    payload={"board_token": result.board_token, "error": result.error},
+                    payload={
+                        "provider": result.provider,
+                        "board_token": result.board_token,
+                        "error": result.error,
+                    },
                 )
             )
             continue
         for raw in result.jobs:
-            outcome = ingest.ingest_greenhouse_job(session, raw)
+            outcome = ingest.ingest_ats_job(session, raw)
             report.jobs_inserted += outcome.inserted
             report.jobs_deduped += outcome.deduped
+
+    # Keyless remote/global boards. Widen coverage beyond India-centric sources
+    # without another credential.
+    if not settings.fixture_mode:
+        for board in settings.remote_boards_list():
+            found = discover_remote.discover_remote_board(board, fetch_fn=fetch_fn)
+            if not found.ok:
+                report.notes.append(f"remote board {board}: {found.error}")
+                continue
+            report.boards_pulled += 1
+            for listing in found.listings:
+                outcome = ingest.ingest_remote_listing(session, board, listing)
+                report.jobs_inserted += outcome.inserted
 
     has_aggregator = settings.fixture_mode or (settings.adzuna_app_id and settings.adzuna_app_key)
     if has_aggregator:
