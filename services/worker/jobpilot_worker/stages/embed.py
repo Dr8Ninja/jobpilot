@@ -60,7 +60,9 @@ def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size:
     if not pending:
         return 0
 
-    model = get_settings().embedding_model
+    settings = get_settings()
+    model = settings.embedding_model
+    budget = settings.embedding_char_budget
     embedded = 0
     for start in range(0, len(pending), batch_size):
         batch = pending[start : start + batch_size]
@@ -76,8 +78,16 @@ def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size:
                 try:
                     vector = client.embed([job_text(job)], input_type="document")[0]
                     pairs.append((job, vector))
-                except Exception as inner:
-                    log.warning("Could not embed job %s: %s", job.id, inner)
+                except Exception:
+                    # Some descriptions tokenize far denser than the usual
+                    # ~4 chars/token, so a budget that is safe on average still
+                    # overflows on outliers. Halve once before giving up.
+                    try:
+                        short = job_text(job, char_budget=budget // 2)
+                        vector = client.embed([short], input_type="document")[0]
+                        pairs.append((job, vector))
+                    except Exception as inner:
+                        log.warning("Could not embed job %s: %s", job.id, inner)
 
         for job, vector in pairs:
             session.add(JobEmbedding(job_id=job.id, embedding=vector, model=model))

@@ -54,6 +54,10 @@ APPLICATION_STATUSES = (
     "applied",
     "rejected",
     "needs_human",
+    #: Scored and kept, but below the tailoring threshold or outside the daily
+    #: cap. Visible in its own tab so nothing is silently dropped — the user can
+    #: promote one and it gets tailored on demand.
+    "not_selected",
     "failed",
 )
 

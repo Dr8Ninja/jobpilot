@@ -53,6 +53,8 @@ const EMPTY_COPY: Record<string, string> = {
   queued: "Nothing waiting on you. Run `jobpilot run-pipeline` to find more.",
   approved: "Nothing approved yet.",
   applied: "Nothing marked as applied yet.",
+  not_selected:
+    "Nothing shortlisted. These are scored matches that fell below the tailoring cut — open one and press Tailor this to pursue it.",
   needs_human: "Nothing needs attention — every tailored resume passed the fact-check.",
   rejected: "Nothing rejected. Anything you reject lands here and can be restored.",
 };

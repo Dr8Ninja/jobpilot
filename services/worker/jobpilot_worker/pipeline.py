@@ -44,6 +44,7 @@ class PipelineReport:
     embedded: int = 0
     scored: int = 0
     selected: int = 0
+    not_selected: int = 0
     tailored_ok: int = 0
     tailored_needs_human: int = 0
     pdfs_rendered: int = 0
@@ -53,7 +54,8 @@ class PipelineReport:
         return (
             f"boards={self.boards_pulled} (failed {self.board_failures}) "
             f"jobs+{self.jobs_inserted} deduped={self.jobs_deduped} "
-            f"embedded={self.embedded} scored={self.scored} selected={self.selected} "
+            f"embedded={self.embedded} scored={self.scored} "
+            f"selected={self.selected} shortlisted={self.not_selected} "
             f"tailored={self.tailored_ok} needs_human={self.tailored_needs_human} "
             f"pdfs={self.pdfs_rendered}"
         )
@@ -179,6 +181,17 @@ def run_pipeline(
 
     selected = score.select_for_tailoring(scores)
     report.selected = len(selected)
+
+    # Everything else that was scored still gets a row. Dropping it on the floor
+    # would hide real matches that merely fell below the cut — the user reviews
+    # these in their own tab and can promote any of them.
+    selected_ids = {row.job_id for row in selected}
+    for row in scores:
+        if row.job_id in selected_ids:
+            continue
+        session.add(Application(job_id=row.job_id, status="not_selected"))
+        report.not_selected += 1
+    session.flush()
 
     for row in selected:
         job = session.get(Job, row.job_id)

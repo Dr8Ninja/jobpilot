@@ -6,6 +6,7 @@ const TABS: { key: string; label: string }[] = [
   { key: "queued", label: "To review" },
   { key: "approved", label: "Approved" },
   { key: "applied", label: "Applied" },
+  { key: "not_selected", label: "Shortlist" },
   { key: "needs_human", label: "Needs attention" },
   { key: "rejected", label: "Rejected" },
   { key: "", label: "All" },

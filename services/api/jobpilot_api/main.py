@@ -236,6 +236,59 @@ def mark_applied(application_id: int, db: Session = Depends(get_db)):
     return _transition(db, application_id, "applied", require_gate=True)
 
 
+@app.post("/api/queue/{application_id}/tailor")
+def tailor_now(application_id: int, db: Session = Depends(get_db)):
+    """Tailor a shortlisted job on demand.
+
+    The nightly run only tailors what clears the threshold and fits the daily
+    cap. This is the manual override: you saw something in the shortlist worth
+    pursuing, so it gets a tailored resume and joins the review queue.
+    """
+    from jobpilot_shared.canonical_facts import CanonicalFacts
+    from jobpilot_shared.db.models import Profile
+    from jobpilot_worker.clients.llm import get_llm_client
+    from jobpilot_worker.pipeline import STORAGE_DIR
+    from jobpilot_worker.stages.render import RenderFailed, render_pdf
+    from jobpilot_worker.stages.tailor import persist_tailoring, tailor_job
+
+    application = db.get(Application, application_id)
+    if application is None:
+        raise HTTPException(404, "Application not found")
+
+    profile = db.scalar(select(Profile))
+    if profile is None:
+        raise HTTPException(409, "No confirmed canonical_facts. Run `jobpilot confirm-facts`.")
+    facts = CanonicalFacts.model_validate(profile.canonical_facts)
+
+    job = db.get(Job, application.job_id)
+    score = _latest_score(db, job.id)
+    gaps = ((score.verdict if score else {}) or {}).get("keyword_gaps", [])
+
+    attempt = tailor_job(facts, job, gaps, get_llm_client())
+    run = persist_tailoring(db, job, attempt)
+    application.tailoring_run_id = run.id
+
+    if not attempt.passed:
+        application.status = "needs_human"
+        db.flush()
+        return {"application_id": application.id, "status": application.status}
+
+    try:
+        path = render_pdf(
+            facts,
+            attempt.output,
+            STORAGE_DIR / f"job-{job.id}.pdf",
+            target_company=job.company.name if job.company else None,
+        )
+        run.pdf_path = str(path)
+    except RenderFailed as exc:
+        db.add(Event(job_id=job.id, type="render.failed", payload={"error": str(exc)}))
+
+    application.status = "queued"
+    db.flush()
+    return {"application_id": application.id, "status": application.status}
+
+
 @app.post("/api/queue/{application_id}/restore")
 def restore(application_id: int, db: Session = Depends(get_db)):
     """Move a rejected or needs-human card back into the queue.

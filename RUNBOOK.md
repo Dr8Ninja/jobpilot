@@ -96,14 +96,19 @@ Tabs across the top, with live counts:
 | **To review** | Tailored and fact-checked, waiting on you |
 | **Approved** | You said yes; go apply |
 | **Applied** | You applied — this is what the response-rate baseline is built from |
+| **Shortlist** | Scored and kept, but below the tailoring cut. Open one and press **Tailor this** to generate a resume for it on demand |
 | **Needs attention** | Tailoring could not pass the fact-check after 3 tries |
 | **Rejected** | You said no |
 | **All** | Everything |
 
-**Nothing is ever deleted.** Reject moves a card to the Rejected tab; open it and
-press **Restore to queue** to bring it back. Cards in *Needs attention* can be
-restored the same way — they stay for your inspection with the exact fact-check
-failures listed.
+**Nothing is ever deleted.** Every job that gets scored produces a card — the top
+ones are tailored automatically, the rest land in **Shortlist**. Reject moves a
+card to the Rejected tab; open it and press **Restore to queue** to bring it back.
+Cards in *Needs attention* restore the same way, and keep the exact fact-check
+failures listed for your inspection.
+
+Every transition is written to the `events` table, so the history of what you
+rejected and restored is auditable.
 
 On a card you get the word-level diff (original bullet → rewritten), the score
 rationale, any flagged technologies, the tailored PDF, and a link to the real

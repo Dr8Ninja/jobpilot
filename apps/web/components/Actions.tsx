@@ -20,7 +20,7 @@ export function Actions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function act(action: "approve" | "reject" | "applied" | "restore") {
+  async function act(action: "approve" | "reject" | "applied" | "restore" | "tailor") {
     setBusy(true);
     setError(null);
     try {
@@ -45,8 +45,20 @@ export function Actions({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
+        {status === "not_selected" && (
+          <button
+            className={`${base} border-accent bg-accent text-white hover:bg-[#18493d]`}
+            disabled={busy}
+            onClick={() => act("tailor")}
+            title="Generate a tailored resume for this role and move it to the review queue"
+          >
+            {busy ? "Tailoring…" : "Tailor this"}
+          </button>
+        )}
         <button
-          className={`${base} border-accent bg-accent text-white hover:bg-[#18493d]`}
+          className={`${base} border-accent bg-accent text-white hover:bg-[#18493d] ${
+            status === "not_selected" ? "hidden" : ""
+          }`}
           disabled={busy || !whitelistPassed || status === "approved"}
           onClick={() => act("approve")}
           title={
