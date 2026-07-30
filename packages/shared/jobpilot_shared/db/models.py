@@ -148,9 +148,13 @@ class Job(Base):
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
 
     source: Mapped[str] = mapped_column(String(32))
-    external_id: Mapped[str] = mapped_column(String(128))
+    #: Provider-supplied. 128 was too tight: Arbeitnow builds its slug from every
+    #: location a posting names, and one job spanning seven of them overflowed and
+    #: aborted a whole discovery run. Bounded rather than Text because it carries a
+    #: unique index; `bound_external_id` collapses anything longer.
+    external_id: Mapped[str] = mapped_column(String(512))
     #: Greenhouse job id. NULL for aggregator rows whose destination did not resolve.
-    ats_job_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ats_job_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     title: Mapped[str] = mapped_column(Text)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)

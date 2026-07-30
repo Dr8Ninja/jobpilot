@@ -197,6 +197,18 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 - [ ] Celery beat schedule wrapping `run_pipeline` (the last Phase 0 item)
 
 ### Decisions worth remembering
+- **A provider can always surprise the schema; draw the boundary at one row.**
+  Three separate runs died to a single bad row: an LLM timeout during tailoring,
+  a transport error escaping the scoring `except`, and a 133-char Arbeitnow slug
+  overflowing `jobs.external_id(128)`. Discovery, scoring and tailoring now each
+  absorb per-row failures, stages commit as they finish, and `ingest_one` rolls
+  back before continuing — Postgres aborts the whole transaction on a failed
+  statement, so without the rollback every later insert fails too.
+- **Never truncate an identity column.** `external_id` is now `String(512)` with
+  `bound_external_id` collapsing anything longer to a prefix plus a digest of the
+  original. Plain truncation would silently merge two distinct postings that
+  share a long prefix; the digest keeps them apart and keeps dedupe stable
+  across runs.
 - **A skills gap never drops a job** (user instruction, 2026-07-28). Selection
   filters on seniority and location only, then *ranks* by score — a weak band
   sinks, it does not disappear. The gaps feed the skills-to-learn report instead.

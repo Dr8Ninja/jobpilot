@@ -132,3 +132,27 @@ def parse_timestamp(value: object) -> dt.datetime | None:
         except ValueError:
             continue
     return None
+
+
+#: Widest an external id may be, matching the `jobs.external_id` column.
+EXTERNAL_ID_LIMIT = 512
+
+
+def bound_external_id(value: str, *, limit: int = EXTERNAL_ID_LIMIT) -> str:
+    """Keep a provider's own id, but never let its length break the insert.
+
+    Arbeitnow builds its slug from every location a posting names, so one job
+    listing Berlin, three Indian cities, Lithuania, Serbia and the UK produced a
+    133-character id and a `StringDataRightTruncation` that aborted the whole
+    discovery run.
+
+    Plain truncation is wrong here: this column is an identity, and two postings
+    from the same employer can share a long prefix, so cutting it would silently
+    merge distinct jobs. Instead an over-long id keeps a readable prefix and
+    ends in a digest of the full original — deterministic, so re-running
+    discovery maps the same posting to the same row and dedupe still works.
+    """
+    if len(value) <= limit:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    return f"{value[: limit - len(digest) - 1]}-{digest}"

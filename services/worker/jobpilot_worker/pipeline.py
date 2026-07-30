@@ -41,6 +41,7 @@ class PipelineReport:
     board_failures: int = 0
     jobs_inserted: int = 0
     jobs_deduped: int = 0
+    jobs_failed: int = 0
     embedded: int = 0
     scored: int = 0
     selected: int = 0
@@ -55,6 +56,7 @@ class PipelineReport:
         return (
             f"boards={self.boards_pulled} (failed {self.board_failures}) "
             f"jobs+{self.jobs_inserted} deduped={self.jobs_deduped} "
+            f"unstorable={self.jobs_failed} "
             f"embedded={self.embedded} scored={self.scored} "
             f"selected={self.selected} shortlisted={self.not_selected} "
             f"tailored={self.tailored_ok} needs_human={self.tailored_needs_human} "
@@ -108,9 +110,11 @@ def run_discovery(session: Session, report: PipelineReport) -> None:
             )
             continue
         for raw in result.jobs:
-            outcome = ingest.ingest_ats_job(session, raw)
+            outcome = ingest.ingest_one(session, ingest.ingest_ats_job, raw)
             report.jobs_inserted += outcome.inserted
             report.jobs_deduped += outcome.deduped
+            report.jobs_failed += outcome.failed
+            report.notes.extend(outcome.notes)
 
     # Keyless remote/global boards. Widen coverage beyond India-centric sources
     # without another credential.
@@ -122,8 +126,10 @@ def run_discovery(session: Session, report: PipelineReport) -> None:
                 continue
             report.boards_pulled += 1
             for listing in found.listings:
-                outcome = ingest.ingest_remote_listing(session, board, listing)
+                outcome = ingest.ingest_one(session, ingest.ingest_remote_listing, board, listing)
                 report.jobs_inserted += outcome.inserted
+                report.jobs_failed += outcome.failed
+                report.notes.extend(outcome.notes)
 
     has_aggregator = settings.fixture_mode or (settings.adzuna_app_id and settings.adzuna_app_key)
     if has_aggregator:
@@ -139,9 +145,10 @@ def run_discovery(session: Session, report: PipelineReport) -> None:
                     continue
                 for listing in found.listings:
                     resolved = resolve.resolve_listing(listing, fetch_fn=fetch_fn)
-                    outcome = ingest.ingest_resolved_listing(session, resolved)
+                    outcome = ingest.ingest_one(session, ingest.ingest_resolved_listing, resolved)
                     report.jobs_inserted += outcome.inserted
                     report.jobs_deduped += outcome.deduped
+                    report.jobs_failed += outcome.failed
                     report.notes.extend(outcome.notes)
     else:
         report.notes.append("aggregator skipped: ADZUNA credentials not configured")

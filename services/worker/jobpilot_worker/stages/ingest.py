@@ -16,9 +16,10 @@ from dataclasses import dataclass, field
 from jobpilot_shared.db.models import Company, Event, Job
 from jobpilot_shared.location import classify_location
 from sqlalchemy import select
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
-from .types import RawJob, RawListing, ResolvedListing, content_hash
+from .types import RawJob, RawListing, ResolvedListing, bound_external_id, content_hash
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +53,12 @@ class IngestReport:
     inserted: int = 0
     updated: int = 0
     deduped: int = 0
+    #: Already had this row — the normal re-run path, not a problem.
     skipped: int = 0
+    #: Could not be stored at all. Distinct from `skipped`: conflating "we
+    #: already have it" with "the provider sent something we cannot store" hides
+    #: real breakage inside a number that is large and healthy on every run.
+    failed: int = 0
     notes: list[str] = field(default_factory=list)
 
     def merge(self, other: "IngestReport") -> "IngestReport":
@@ -61,6 +67,7 @@ class IngestReport:
             updated=self.updated + other.updated,
             deduped=self.deduped + other.deduped,
             skipped=self.skipped + other.skipped,
+            failed=self.failed + other.failed,
             notes=self.notes + other.notes,
         )
 
@@ -146,7 +153,7 @@ def ingest_ats_job(session: Session, raw: RawJob) -> IngestReport:
     job = Job(
         company_id=company.id,
         source=raw.ats_provider,
-        external_id=raw.ats_job_id,
+        external_id=bound_external_id(raw.ats_job_id),
         ats_job_id=raw.ats_job_id,
         title=raw.title,
         location=raw.location,
@@ -194,7 +201,7 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
         discovered_via="aggregator",
     )
 
-    existing = _existing_by_source(session, "adzuna", listing.external_id)
+    existing = _existing_by_source(session, "adzuna", bound_external_id(listing.external_id))
     if existing is not None:
         if existing.posted_at is None and listing.posted_at is not None:
             existing.posted_at = listing.posted_at
@@ -229,7 +236,7 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
     job = Job(
         company_id=company.id,
         source="adzuna",
-        external_id=listing.external_id,
+        external_id=bound_external_id(listing.external_id),
         ats_job_id=resolved.ats_job_id,
         title=listing.title,
         location=listing.location,
@@ -258,7 +265,7 @@ def ingest_remote_listing(session: Session, source: str, listing: "RawListing") 
     report = IngestReport()
     company = upsert_company(session, listing.company_name, discovered_via="aggregator")
 
-    existing = _existing_by_source(session, source, listing.external_id)
+    existing = _existing_by_source(session, source, bound_external_id(listing.external_id))
     if existing is not None:
         if existing.posted_at is None and listing.posted_at is not None:
             existing.posted_at = listing.posted_at
@@ -271,7 +278,7 @@ def ingest_remote_listing(session: Session, source: str, listing: "RawListing") 
         Job(
             company_id=company.id,
             source=source,
-            external_id=listing.external_id,
+            external_id=bound_external_id(listing.external_id),
             ats_job_id=None,
             title=listing.title,
             location=listing.location,
@@ -287,3 +294,27 @@ def ingest_remote_listing(session: Session, source: str, listing: "RawListing") 
     session.flush()
     report.inserted += 1
     return report
+
+
+def ingest_one(session: Session, call, *args) -> IngestReport:
+    """Run one ingest call, absorbing a row-level database error.
+
+    Discovery pulls tens of thousands of rows from nine providers, and a single
+    malformed one used to abort the entire run — the third time that happened it
+    was a 133-character Arbeitnow slug overflowing `jobs.external_id`. A provider
+    can always surprise the schema, so the boundary is drawn here: one bad
+    listing is skipped and recorded, and the other 13,000 still land.
+
+    The rollback is not optional. Postgres aborts the whole transaction on a
+    failed statement, so without it every subsequent insert in the run fails too.
+    """
+    try:
+        return call(session, *args)
+    except (DataError, IntegrityError, DBAPIError) as exc:
+        session.rollback()
+        report = IngestReport()
+        detail = str(getattr(exc, "orig", exc)).strip().splitlines()[0][:200]
+        report.failed = 1
+        report.notes.append(f"ingest failed on one listing: {detail}")
+        log.warning("Ingest failed for one listing, continuing: %s", detail)
+        return report

@@ -176,6 +176,26 @@ you have not used, and the resume still only ever claims what you have done.
 
 ---
 
+## If a run fails
+
+Nothing in a run is all-or-nothing any more. Stages commit as they finish, and a
+single bad row — a provider timeout, a malformed listing — is recorded and
+skipped. The summary line reports it:
+
+```
+boards=97 (failed 0) jobs+18 deduped=0 unstorable=0 embedded=18 scored=40 ...
+```
+
+`unstorable` counts listings a provider sent that could not be stored;
+`tailor_failed` counts jobs whose LLM call did not come back. Both are logged
+with the reason. A non-zero number is not a failed run — it is a handful of rows
+out of thousands.
+
+If you saw `value too long for type character varying(128)` before, that was
+`jobs.external_id` — fixed by a migration, so run `uv run alembic upgrade head`.
+
+---
+
 ## Adding more companies
 
 ```yaml
