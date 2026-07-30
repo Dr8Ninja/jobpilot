@@ -346,7 +346,7 @@ def tailor_now(application_id: int, db: Session = Depends(get_db)):
     score = _latest_score(db, job.id)
     gaps = ((score.verdict if score else {}) or {}).get("keyword_gaps", [])
 
-    attempt = tailor_job(facts, job, gaps, get_llm_client())
+    attempt = tailor_job(facts, job, gaps, get_llm_client(purpose="tailoring"))
     run = persist_tailoring(db, job, attempt)
     application.tailoring_run_id = run.id
 

@@ -27,15 +27,23 @@ class StubJob:
 
 
 def _clean(facts: CanonicalFacts) -> TailoringOutput:
+    """A complete, honest tailoring: every bullet rewritten, nothing invented.
+
+    Completeness matters even though these tests are about the gate — a reply
+    that leaves bullets untailored now triggers its own retry, which would mask
+    the gate behaviour under test.
+    """
     return TailoringOutput(
         summary="Backend engineer with 1.5 years shipping Python services.",
         tailored_bullets=[
             TailoredBullet(
-                employment_index=0,
-                original="Built REST endpoints for the billing service.",
-                rewritten="Built REST endpoints for the billing service in Python.",
+                employment_index=index,
+                original=bullet,
+                rewritten=f"{bullet.rstrip('.')}, in Python.",
                 skills_referenced=["Python"],
             )
+            for index, role in enumerate(facts.employment)
+            for bullet in role.bullets
         ],
         skills_ordered_for_this_jd=["Python", "PostgreSQL", "Redis"],
     )
@@ -128,3 +136,32 @@ def test_no_sampling_parameters_are_ever_sent(facts: CanonicalFacts) -> None:
     for banned in ("temperature", "top_p", "top_k"):
         assert banned not in call
     assert call["model"] == get_settings().tailoring_model
+
+
+def test_retries_are_spaced_out_rather_than_hammered(facts: CanonicalFacts, monkeypatch) -> None:
+    """Measured live: three immediate attempts failed all three on 4 of 11 cards.
+
+    The provider is intermittent, not down, so the retry has to wait. Doubling
+    keeps the first retry quick without piling onto a struggling endpoint.
+    """
+    slept: list[float] = []
+    monkeypatch.setattr("jobpilot_worker.stages.tailor.time.sleep", slept.append)
+
+    client = FakeLLMClient()
+    client.queue(_hallucinated(), _hallucinated(), _clean(facts))
+
+    attempt = tailor_job(facts, StubJob(), [], client)
+
+    assert attempt.passed
+    assert len(slept) == 2, "one wait before each retry, none before the first attempt"
+    assert slept[1] > slept[0], "the wait must grow"
+
+
+def test_the_first_attempt_never_waits(facts: CanonicalFacts, monkeypatch) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr("jobpilot_worker.stages.tailor.time.sleep", slept.append)
+
+    client = FakeLLMClient()
+    client.queue(_clean(facts))
+    assert tailor_job(facts, StubJob(), [], client).passed
+    assert slept == []

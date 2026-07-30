@@ -10,6 +10,7 @@ output is never silently shown, and never rendered.
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from jobpilot_shared.canonical_facts import CanonicalFacts
@@ -29,6 +30,41 @@ from ..clients.llm import LLMClient, LLMParseError, LLMRefusal
 from ..prompts import TAILORING_SYSTEM, build_tailoring_prompt
 
 log = logging.getLogger(__name__)
+
+
+def missing_bullets(facts: CanonicalFacts, output: TailoringOutput) -> dict[int, int]:
+    """Per role, how many bullets the model failed to rewrite.
+
+    A short reply is not a fact-check failure, so the gate has nothing to say
+    about it — but it is still a bad tailoring. The renderer keeps the layout
+    intact by falling back to the candidate's original wording, which means a
+    model that returns nothing produces a perfectly-shaped *untailored* resume.
+    That looked like success until it was measured: one live reply carried zero
+    bullets and still passed. So completeness is checked here and retried, using
+    the same loop the gate rejections use.
+    """
+    counted: dict[int, int] = {}
+    for bullet in output.tailored_bullets:
+        if 0 <= bullet.employment_index < len(facts.employment):
+            counted[bullet.employment_index] = counted.get(bullet.employment_index, 0) + 1
+    return {
+        index: len(role.bullets) - counted.get(index, 0)
+        for index, role in enumerate(facts.employment)
+        if counted.get(index, 0) < len(role.bullets)
+    }
+
+
+def _shortfall_constraint(facts: CanonicalFacts, shortfall: dict[int, int]) -> str:
+    wanted = ", ".join(
+        f"employment_index {i} needs {len(facts.employment[i].bullets)} bullets ({n} missing)"
+        for i, n in sorted(shortfall.items())
+    )
+    return (
+        f"Your previous reply was incomplete: {wanted}. Return one rewritten bullet "
+        f"for EVERY bullet in canonical_facts.employment — "
+        f"{sum(len(r.bullets) for r in facts.employment)} in total — in the same "
+        "order, each echoing its source text in `original`. Do not drop or merge any."
+    )
 
 
 def _as_dicts(violations: tuple[Violation, ...]) -> list[dict]:
@@ -56,6 +92,13 @@ class TailoringAttempt:
         return self.gate is not None and self.gate.passed
 
 
+def _completeness(facts: CanonicalFacts, output: TailoringOutput) -> int:
+    """How many of the resume's bullets this output actually rewrote."""
+    return sum(len(r.bullets) for r in facts.employment) - sum(
+        missing_bullets(facts, output).values()
+    )
+
+
 def tailor_job(
     facts: CanonicalFacts,
     job: Job,
@@ -75,6 +118,13 @@ def tailor_job(
     last_gate: GateResult | None = None
 
     for attempt in range(1, max_attempts + 1):
+        if attempt > 1 and settings.llm_retry_backoff_seconds > 0:
+            # The provider is intermittent rather than down, so spacing the
+            # attempts out is what actually recovers them. Doubling keeps the
+            # first retry quick without hammering a struggling endpoint.
+            delay = settings.llm_retry_backoff_seconds * (2 ** (attempt - 2))
+            log.info("Waiting %.0fs before tailoring attempt %s for job %s", delay, attempt, job.id)
+            time.sleep(delay)
         try:
             output = client.parse(
                 model=settings.tailoring_model,
@@ -95,10 +145,27 @@ def tailor_job(
             )
 
         gate = check(facts, output, target_company=company)
-        last_output, last_gate = output, gate
+        # Keep the most complete output seen, not merely the latest: a later
+        # attempt can come back emptier than an earlier one.
+        if last_output is None or _completeness(facts, output) > _completeness(facts, last_output):
+            last_output, last_gate = output, gate
 
         if gate.passed:
-            return TailoringAttempt(output=output, gate=gate, attempts=attempt, history=history)
+            shortfall = missing_bullets(facts, output)
+            if not shortfall:
+                return TailoringAttempt(output=output, gate=gate, attempts=attempt, history=history)
+            # Passed the fact-check but left bullets untailored. Worth another
+            # attempt, and harmless if the retry budget runs out — the renderer
+            # falls back to the candidate's own wording for whatever is missing.
+            history.append(f"attempt {attempt} incomplete: {sum(shortfall.values())} bullets short")
+            log.info(
+                "Job %s attempt %s passed the gate but left %s bullets untailored",
+                job.id,
+                attempt,
+                sum(shortfall.values()),
+            )
+            constraints = _shortfall_constraint(facts, shortfall)
+            continue
 
         assert isinstance(gate, Rejected)
         rules = ", ".join(sorted({v.rule for v in gate.reasons}))

@@ -12,8 +12,21 @@ from jobpilot_shared.canonical_facts import CanonicalFacts
 TAILORING_SYSTEM = """\
 You rewrite one candidate's existing resume bullets to fit a specific job description.
 
+The candidate's resume layout is fixed and is not yours to change. Return EXACTLY
+ONE rewritten bullet for EVERY bullet in canonical_facts.employment, in the same
+order, carrying that bullet's `employment_index` and its text in `original`. A
+role with five bullets gets five rewrites. Never merge two bullets, never drop
+one because it seems less relevant, and never add a sixth — the document must
+have the same shape as the one the candidate wrote.
+
+Keep each rewrite close to the length of the bullet it replaces (within roughly
+10%). The resume is one page and stays one page; a rewrite twice as long as the
+original breaks the layout, and a one-line rewrite of a three-line bullet throws
+away real detail the candidate earned.
+
 You may:
-- reorder and rephrase bullets that already exist
+- rephrase each bullet, keeping its subject and its accomplishment
+- lead with the part of the bullet this job cares about most
 - surface skills the candidate already has that the job asks for
 - mirror the job description's vocabulary where it honestly describes existing work
 
@@ -22,6 +35,7 @@ You must never:
 - change or imply a different experience_years, job title, employer, or date
 - name any company the candidate has not worked for
 - invent a project, a metric, or a responsibility
+- drop, merge, shorten past recognition, or invent a bullet
 
 Every entry in skills_referenced must appear verbatim in canonical_facts.skills.
 An automated fact-check runs on your output and rejects violations, so inventing
@@ -93,6 +107,13 @@ def build_tailoring_prompt(
     retry_constraints: str = "",
 ) -> str:
     gaps = ", ".join(keyword_gaps) if keyword_gaps else "(none identified)"
+    # Spelling out the expected count, and the per-role split, measurably helps.
+    # The renderer guarantees the shape regardless, but a short reply means real
+    # bullets fall back to their original wording instead of being tailored.
+    per_role = ", ".join(
+        f"index {i} needs {len(role.bullets)}" for i, role in enumerate(facts.employment)
+    )
+    bullet_budget = sum(len(role.bullets) for role in facts.employment)
     prompt = f"""\
 <canonical_facts>
 {_facts_json(facts)}
@@ -109,10 +130,14 @@ Title: {title}
 {gaps}
 </keyword_gaps>
 
-Rewrite the candidate's bullets for this job. Produce one tailored bullet per
-original bullet you choose to include, each carrying the `employment_index` of the
-role it belongs to. `skills_ordered_for_this_jd` should rank the candidate's
-existing skills by relevance to this job.
+Rewrite the candidate's bullets for this job. Produce one tailored bullet for
+every bullet listed under canonical_facts.employment — {bullet_budget} in total
+({per_role}), in the order they appear — each carrying the `employment_index` of
+the role it belongs to and the untouched original text in `original`. Same count,
+same order, comparable length: only the wording changes.
+
+`skills_ordered_for_this_jd` should rank the candidate's existing skills by
+relevance to this job.
 
 The keyword gaps are context, not a shopping list: do not claim any of them the
 candidate does not already have.

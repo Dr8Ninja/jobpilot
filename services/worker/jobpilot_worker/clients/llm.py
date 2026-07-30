@@ -128,7 +128,15 @@ class FakeLLMClient:
         return queued.pop(0) if len(queued) > 1 else queued[0]  # type: ignore[return-value]
 
 
-def get_llm_client() -> LLMClient:
+def get_llm_client(*, purpose: str = "general") -> LLMClient:
+    """`purpose="tailoring"` uses its own model fallback chain.
+
+    Falling back is only worth it if the next model does the work. For scoring it
+    does — the verdict's categorical fields come back correct from every model
+    measured. For tailoring it does not: the fallbacks answer with a schema-valid
+    but empty `tailored_bullets` list, which passes the fact-check, consumes the
+    attempt, and produces an untailored resume. Retrying the primary beats that.
+    """
     settings = get_settings()
     if settings.fixture_mode:
         from ..fixtures import build_fake_llm_client
@@ -138,4 +146,6 @@ def get_llm_client() -> LLMClient:
         return AnthropicLLMClient()
     from .openai_compat import OpenAICompatLLMClient
 
+    if purpose == "tailoring":
+        return OpenAICompatLLMClient(fallback_models=settings.tailoring_fallback_models_list())
     return OpenAICompatLLMClient()

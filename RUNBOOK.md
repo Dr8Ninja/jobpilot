@@ -196,6 +196,24 @@ If you saw `value too long for type character varying(128)` before, that was
 
 ---
 
+## What tailoring may and may not change
+
+The tailored resume is the same document you wrote, reworded:
+
+| Fixed | Tailored |
+|---|---|
+| Sections and their order | Bullet wording |
+| Employers, titles, dates, locations | Which part of a bullet leads |
+| **The number of bullets per role, and their order** | Skill order *within* a group |
+| Project names, degree, institution | The summary line |
+| Skill group labels and membership | |
+
+The bullet count is enforced in code, not requested of the model. If a reply
+comes back short, the missing positions keep your original wording and the run is
+retried — you never get a truncated resume. The retry history is on the card.
+
+---
+
 ## Adding more companies
 
 ```yaml

@@ -17,7 +17,7 @@ import sys
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from jobpilot_shared.canonical_facts import CanonicalFacts
-from jobpilot_shared.tailoring_io import TailoringOutput
+from jobpilot_shared.tailoring_io import TailoredBullet, TailoringOutput
 from jobpilot_shared.whitelist import Rejected, check
 
 log = logging.getLogger(__name__)
@@ -75,9 +75,7 @@ def build_html(
             "Nothing that fails the gate may reach a PDF."
         )
 
-    bullets_by_role: dict[int, list[str]] = {}
-    for bullet in output.tailored_bullets:
-        bullets_by_role.setdefault(bullet.employment_index, []).append(bullet.rewritten)
+    bullets_by_role = bullets_for_render(facts, output)
 
     # Only canonical skills reach the document; the gate has already proven the
     # ordered list is a subset, so this is belt-and-braces rather than a filter.
@@ -102,6 +100,66 @@ def build_html(
             bullets_by_role=bullets_by_role,
         )
     )
+
+
+def bullets_for_render(facts: CanonicalFacts, output: TailoringOutput) -> dict[int, list[str]]:
+    """One bullet list per role, always the same length as the source resume.
+
+    The layout of the document is the candidate's, not the model's. So this walks
+    the *canonical* bullets and asks "is there a rewrite for this one?" rather
+    than rendering whatever the model happened to return. A role with five
+    bullets renders five bullets: rewritten where the model supplied a rewrite,
+    verbatim where it did not.
+
+    That inversion is not defensive tidiness — it is a measured failure. Every
+    live tailoring returned fewer bullets than the resume has, one of them a
+    single bullet for a five-bullet role, and the old renderer silently published
+    the truncation. Asking the model more firmly helps; deriving the shape in
+    code is what guarantees it.
+
+    Rewrites are matched to originals by text, falling back to position, because
+    models echo the `original` field with cosmetic edits and sometimes paraphrase
+    it entirely.
+    """
+    by_role: dict[int, list[TailoredBullet]] = {}
+    for bullet in output.tailored_bullets:
+        if 0 <= bullet.employment_index < len(facts.employment):
+            by_role.setdefault(bullet.employment_index, []).append(bullet)
+
+    rendered: dict[int, list[str]] = {}
+    for index, role in enumerate(facts.employment):
+        slots: list[TailoredBullet | None] = [None] * len(role.bullets)
+        position_of = {_bullet_key(b): i for i, b in enumerate(role.bullets)}
+
+        # Pass one: a rewrite that echoes its original claims that exact position.
+        unplaced: list[TailoredBullet] = []
+        for candidate in by_role.get(index, ()):
+            position = position_of.get(_bullet_key(candidate.original))
+            if position is not None and slots[position] is None:
+                slots[position] = candidate
+            else:
+                unplaced.append(candidate)
+
+        # Pass two: whatever is left fills the still-empty slots in order. This
+        # catches a model that paraphrased the `original` field instead of
+        # echoing it, and drops any surplus — the resume must not grow either.
+        free = [i for i, slot in enumerate(slots) if slot is None]
+        for position, candidate in zip(free, unplaced, strict=False):
+            slots[position] = candidate
+
+        lines: list[str] = []
+        for position, original in enumerate(role.bullets):
+            slot = slots[position]
+            rewritten = (slot.rewritten or "").strip() if slot else ""
+            # An empty rewrite would render a bullet marker with no text.
+            lines.append(rewritten or original)
+        rendered[index] = lines
+    return rendered
+
+
+def _bullet_key(text: str) -> str:
+    """Comparison key for matching a rewrite back to the bullet it replaces."""
+    return " ".join((text or "").split()).casefold()
 
 
 def _ordered_skill_rows(facts: CanonicalFacts, ordered: list[str]) -> list[dict]:

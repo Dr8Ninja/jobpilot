@@ -162,6 +162,10 @@ def run_pipeline(
     embedder: EmbeddingClient | None = None,
     storage_dir: pathlib.Path | None = None,
 ) -> PipelineReport:
+    # Tailoring gets its own client: the shared fallback models answer a tailoring
+    # request with an empty bullet list, which costs an attempt and yields an
+    # untailored resume. An injected client (tests, fixtures) is used for both.
+    tailoring_llm = llm or get_llm_client(purpose="tailoring")
     llm = llm or get_llm_client()
     embedder = embedder or get_embedding_client()
     storage = storage_dir or STORAGE_DIR
@@ -214,7 +218,7 @@ def run_pipeline(
         job_id = job.id  # captured: the rollback below expires the instance
         gaps = (row.verdict or {}).get("keyword_gaps", [])
         try:
-            attempt = tailor.tailor_job(facts, job, gaps, llm)
+            attempt = tailor.tailor_job(facts, job, gaps, tailoring_llm)
         except Exception as exc:
             # One unlucky job must not cost the run. The provider times out often
             # enough that this is the normal path, not an edge case — the job

@@ -197,6 +197,29 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 - [ ] Celery beat schedule wrapping `run_pipeline` (the last Phase 0 item)
 
 ### Decisions worth remembering
+- **The document's shape is the candidate's, not the model's.** Every live
+  tailoring returned fewer bullets than the resume has — one gave 1 bullet for a
+  5-bullet role — and the renderer published the truncation. `bullets_for_render`
+  now walks the *canonical* bullets and pulls in a rewrite where one exists,
+  falling back to the original wording otherwise, so the count and order can
+  never depend on the model. Surplus bullets are dropped too: the resume must not
+  grow either.
+- **A fallback is only a fallback if the next model does the work.** Measured on
+  this account: `nvidia/nemotron-3-super-120b-a12b` (2.6s) and
+  `openai/gpt-oss-20b` (16s) both answer a *tailoring* request with a
+  schema-valid but empty `tailored_bullets` list, while `openai/gpt-oss-120b`
+  (54s idle, ~106s live) is the only one that does the job. Falling back to an
+  empty answer is worse than a timeout — it passes the gate and burns the
+  attempt. Tailoring therefore has its own empty fallback chain and retries the
+  primary; scoring keeps the shared chain, where the same models return correct
+  categorical verdicts. `llm_timeout_seconds` is 180: 90 cut off the one model
+  that works.
+- **An empty tailoring is not a passing tailoring.** A fallback model returned
+  zero bullets, the gate had nothing to reject, and the result was a
+  perfectly-shaped *untailored* PDF that looked like success. Completeness is now
+  checked next to the gate and retried through the same loop, and the most
+  complete attempt is kept rather than the last — a later attempt can come back
+  emptier than an earlier one.
 - **A provider can always surprise the schema; draw the boundary at one row.**
   Three separate runs died to a single bad row: an LLM timeout during tailoring,
   a transport error escaping the scoring `except`, and a 133-char Arbeitnow slug

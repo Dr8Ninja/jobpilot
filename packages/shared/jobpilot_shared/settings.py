@@ -86,8 +86,27 @@ class Settings(BaseSettings):
         default="openai/gpt-oss-120b,nvidia/nemotron-3-super-120b-a12b",
         validation_alias=_jobpilot("llm_fallback_models"),
     )
+    #: 90s cut `openai/gpt-oss-120b` off mid-answer under load — measured at 54s
+    #: idle for a full 8-bullet tailoring, slower when the account is busy. A
+    #: truncated call costs the whole attempt, so waiting is cheaper than retrying.
     llm_timeout_seconds: float = Field(
-        default=90.0, validation_alias=_jobpilot("llm_timeout_seconds")
+        default=180.0, validation_alias=_jobpilot("llm_timeout_seconds")
+    )
+    #: Seconds to wait before re-attempting a tailoring call, doubling each time.
+    #: Measured: hammering NIM three times in immediate succession failed all
+    #: three on 4 of 11 cards, while the same cards succeeded when spaced out.
+    #: The provider is intermittent, not broken — waiting is the whole fix.
+    llm_retry_backoff_seconds: float = Field(
+        default=8.0, validation_alias=_jobpilot("llm_retry_backoff_seconds")
+    )
+    #: Tailoring gets its own (empty) chain. Measured on this account: every
+    #: fallback answers a tailoring request with a schema-valid but EMPTY
+    #: `tailored_bullets` list. That is worse than a timeout — it looks like
+    #: success, consumes the attempt, and yields an untailored resume. Retrying
+    #: the primary is strictly better. Scoring keeps the shared chain, where the
+    #: same models return correct categorical verdicts.
+    tailoring_fallback_models: str = Field(
+        default="", validation_alias=_jobpilot("tailoring_fallback_models")
     )
 
     # "nvidia" reuses the chat key; "voyage" needs a separate pa-... key.
@@ -115,6 +134,9 @@ class Settings(BaseSettings):
 
     def llm_fallback_models_list(self) -> list[str]:
         return [m.strip() for m in self.llm_fallback_models.split(",") if m.strip()]
+
+    def tailoring_fallback_models_list(self) -> list[str]:
+        return [m.strip() for m in self.tailoring_fallback_models.split(",") if m.strip()]
 
     # Claude Sonnet 5 runs adaptive thinking by default and max_tokens caps
     # thinking + output together, so these carry headroom above the JSON payload.
