@@ -47,6 +47,7 @@ class PipelineReport:
     not_selected: int = 0
     tailored_ok: int = 0
     tailored_needs_human: int = 0
+    tailoring_failed: int = 0
     pdfs_rendered: int = 0
     notes: list[str] = field(default_factory=list)
 
@@ -57,6 +58,7 @@ class PipelineReport:
             f"embedded={self.embedded} scored={self.scored} "
             f"selected={self.selected} shortlisted={self.not_selected} "
             f"tailored={self.tailored_ok} needs_human={self.tailored_needs_human} "
+            f"tailor_failed={self.tailoring_failed} "
             f"pdfs={self.pdfs_rendered}"
         )
 
@@ -125,26 +127,22 @@ def run_discovery(session: Session, report: PipelineReport) -> None:
 
     has_aggregator = settings.fixture_mode or (settings.adzuna_app_id and settings.adzuna_app_key)
     if has_aggregator:
-        queries = (
-            ("software engineer",)
-            if settings.fixture_mode
-            else (
-                "software engineer",
-                "backend engineer",
-                "python developer",
-            )
-        )
+        queries = ("software engineer",) if settings.fixture_mode else settings.aggregator_queries
+        # Every query runs against India and again against remote-anywhere, which
+        # is the only way Adzuna surfaces a role that is open from India but not
+        # indexed under an Indian city.
         for query in queries:
-            found = discover_aggregator.search(query, where="India", fetch_fn=fetch_fn)
-            if not found.ok:
-                report.notes.append(f"aggregator '{query}': {found.error}")
-                continue
-            for listing in found.listings:
-                resolved = resolve.resolve_listing(listing, fetch_fn=fetch_fn)
-                outcome = ingest.ingest_resolved_listing(session, resolved)
-                report.jobs_inserted += outcome.inserted
-                report.jobs_deduped += outcome.deduped
-                report.notes.extend(outcome.notes)
+            for where in ("India", "Remote"):
+                found = discover_aggregator.search(query, where=where, fetch_fn=fetch_fn)
+                if not found.ok:
+                    report.notes.append(f"aggregator '{query}' ({where}): {found.error}")
+                    continue
+                for listing in found.listings:
+                    resolved = resolve.resolve_listing(listing, fetch_fn=fetch_fn)
+                    outcome = ingest.ingest_resolved_listing(session, resolved)
+                    report.jobs_inserted += outcome.inserted
+                    report.jobs_deduped += outcome.deduped
+                    report.notes.extend(outcome.notes)
     else:
         report.notes.append("aggregator skipped: ADZUNA credentials not configured")
     session.flush()
@@ -165,8 +163,14 @@ def run_pipeline(
     facts = load_facts(session)
 
     run_discovery(session, report)
+    # Commit after each expensive stage. Without this, a provider timeout in a
+    # later stage rolls the whole run back — a live run lost 2,150 freshly
+    # discovered jobs and their embeddings to one 90s LLM timeout during
+    # tailoring. Discovery and embedding are the slow parts; they must survive.
+    session.commit()
 
     report.embedded = embed.embed_pending_jobs(session, embedder)
+    session.commit()
 
     already_scored = {
         job_id
@@ -179,7 +183,10 @@ def run_pipeline(
     scores = score.score_candidates(session, facts, candidates, llm)
     report.scored = len(scores)
 
-    selected = score.select_for_tailoring(scores)
+    # Selection needs the job rows themselves: seniority and location are read
+    # off the posting, not off the verdict.
+    scored_jobs = {c.job.id: c.job for c in candidates}
+    selected = score.select_for_tailoring(scores, scored_jobs)
     report.selected = len(selected)
 
     # Everything else that was scored still gets a row. Dropping it on the floor
@@ -191,20 +198,33 @@ def run_pipeline(
             continue
         session.add(Application(job_id=row.job_id, status="not_selected"))
         report.not_selected += 1
-    session.flush()
+    session.commit()
 
     for row in selected:
         job = session.get(Job, row.job_id)
         if job is None:
             continue
+        job_id = job.id  # captured: the rollback below expires the instance
         gaps = (row.verdict or {}).get("keyword_gaps", [])
-        attempt = tailor.tailor_job(facts, job, gaps, llm)
+        try:
+            attempt = tailor.tailor_job(facts, job, gaps, llm)
+        except Exception as exc:
+            # One unlucky job must not cost the run. The provider times out often
+            # enough that this is the normal path, not an edge case — the job
+            # stays visible and can be retried from the dashboard.
+            log.warning("Tailoring failed for job %s: %s", job_id, exc)
+            session.rollback()
+            session.add(Event(job_id=job_id, type="tailor.failed", payload={"error": str(exc)}))
+            session.add(Application(job_id=job_id, status="not_selected"))
+            report.tailoring_failed += 1
+            session.commit()
+            continue
         run = tailor.persist_tailoring(session, job, attempt)
 
         if not attempt.passed:
             report.tailored_needs_human += 1
             session.add(Application(job_id=job.id, tailoring_run_id=run.id, status="needs_human"))
-            session.flush()
+            session.commit()
             continue
 
         report.tailored_ok += 1
@@ -223,9 +243,9 @@ def run_pipeline(
             session.add(Event(job_id=job.id, type="render.failed", payload={"error": str(exc)}))
 
         session.add(Application(job_id=job.id, tailoring_run_id=run.id, status="queued"))
-        session.flush()
+        session.commit()
 
     session.add(Event(type="pipeline.completed", payload={"summary": report.summary()}))
-    session.flush()
+    session.commit()
     log.info("Pipeline complete: %s", report.summary())
     return report

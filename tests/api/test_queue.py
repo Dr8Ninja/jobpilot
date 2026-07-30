@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from jobpilot_api.main import app, get_db
 from jobpilot_shared.db.models import Application, Company, Job, Profile, Score, TailoringRun, User
 from jobpilot_worker.fixtures import SAMPLE_FACTS
+from sqlalchemy import select as sa_select
 
 
 @pytest.fixture
@@ -159,3 +160,72 @@ def test_pdf_is_not_served_for_a_failed_gate(client, seeded) -> None:
 def test_unknown_application_is_404(client, seeded) -> None:
     assert client.get("/api/queue/999999").status_code == 404
     assert client.post("/api/queue/999999/approve").status_code == 404
+
+
+# --------------------------------------------------------------------------
+# Location: overseas roles are kept and given their own tab, never dropped.
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def placed(db, seeded):
+    """Give the two seeded jobs distinct locations."""
+    jobs = db.scalars(sa_select(Job).order_by(Job.id)).all()
+    jobs[0].location_kind = "india"
+    jobs[1].location_kind = "overseas"
+    db.flush()
+    return {"india": jobs[0].id, "overseas": jobs[1].id}
+
+
+def test_queue_filters_to_the_requested_locations(client, placed) -> None:
+    cards = client.get("/api/queue?location=india,remote").json()
+    assert [c["job_id"] for c in cards] == [placed["india"]]
+    assert cards[0]["location_kind"] == "india"
+
+
+def test_the_overseas_tab_shows_what_the_main_queue_hides(client, placed) -> None:
+    """Nothing is deleted — an overseas role is one tab across, not gone."""
+    cards = client.get("/api/queue?location=overseas").json()
+    assert [c["job_id"] for c in cards] == [placed["overseas"]]
+
+
+def test_counts_respect_the_location_filter(client, placed) -> None:
+    """A badge that counts rows its own tab will not show is a lie."""
+    counts = {c["status"]: c["count"] for c in client.get("/api/queue/counts").json()}
+    assert counts["overseas"] == 1
+
+    filtered = {
+        c["status"]: c["count"]
+        for c in client.get("/api/queue/counts?location=india,remote").json()
+    }
+    assert filtered.get("queued") == 1
+    assert filtered.get("needs_human") is None
+
+
+# --------------------------------------------------------------------------
+# The skills-to-learn report.
+# --------------------------------------------------------------------------
+
+
+def test_skill_gaps_report_names_the_companies_asking(client, db, seeded) -> None:
+    for score in db.scalars(sa_select(Score)).all():
+        score.verdict = {**score.verdict, "keyword_gaps": ["Kubernetes", "Python"]}
+    db.flush()
+
+    rows = client.get("/api/skill-gaps").json()
+    by_skill = {row["skill"]: row for row in rows}
+    assert "Kubernetes" in by_skill
+    assert by_skill["Kubernetes"]["job_count"] == 2
+    assert by_skill["Kubernetes"]["companies"] == ["Acme Corp"]
+    # Python is already in canonical_facts — a study list must not include it.
+    assert "Python" not in by_skill
+
+
+def test_skill_gaps_threshold_hides_one_off_noise(client, db, seeded) -> None:
+    scores = db.scalars(sa_select(Score).order_by(Score.id)).all()
+    scores[0].verdict = {**scores[0].verdict, "keyword_gaps": ["Kubernetes", "COBOL"]}
+    scores[1].verdict = {**scores[1].verdict, "keyword_gaps": ["Kubernetes"]}
+    db.flush()
+
+    skills = [row["skill"] for row in client.get("/api/skill-gaps?min_jobs=2").json()]
+    assert skills == ["Kubernetes"]

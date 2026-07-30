@@ -10,6 +10,7 @@ export type QueueCard = {
   source: string;
   description_quality: string;
   apply_url: string;
+  location_kind: string;
   has_pdf: boolean;
   warning_count: number;
   posted_at: string | null;
@@ -43,6 +44,7 @@ export type QueueDetail = {
   source: string;
   description_quality: string;
   apply_url: string;
+  location_kind: string;
   description: string;
   match_score: number | null;
   rationale: string | null;
@@ -62,6 +64,16 @@ export type QueueDetail = {
 
 export type StatusCount = { status: string; count: number };
 
+export type SkillGapRow = {
+  skill: string;
+  job_count: number;
+  companies: string[];
+  examples: { company: string; title: string; job_id: number }[];
+};
+
+/** The queue is India + remote by default; overseas roles live in their own tab. */
+export const PREFERRED_LOCATIONS = "india,remote";
+
 const BASE = process.env.JOBPILOT_API_URL ?? "http://127.0.0.1:8000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -73,9 +85,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export const getQueue = (status?: string) =>
-  request<QueueCard[]>(`/api/queue${status ? `?status=${encodeURIComponent(status)}` : ""}`);
-export const getCounts = () => request<StatusCount[]>("/api/queue/counts");
+export const getQueue = (status?: string, location = PREFERRED_LOCATIONS) => {
+  const query = new URLSearchParams();
+  if (status) query.set("status", status);
+  if (location) query.set("location", location);
+  const suffix = query.toString();
+  return request<QueueCard[]>(`/api/queue${suffix ? `?${suffix}` : ""}`);
+};
+export const getCounts = (location = PREFERRED_LOCATIONS) =>
+  request<StatusCount[]>(
+    `/api/queue/counts${location ? `?location=${encodeURIComponent(location)}` : ""}`,
+  );
+export const getSkillGaps = (minJobs = 1) =>
+  request<SkillGapRow[]>(`/api/skill-gaps?min_jobs=${minJobs}`);
 
 /** Human-readable posting age. Undated postings say so rather than guessing. */
 export function postedAge(iso: string | null): string {

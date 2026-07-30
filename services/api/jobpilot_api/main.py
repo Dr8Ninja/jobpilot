@@ -17,7 +17,14 @@ from jobpilot_shared.db.session import get_session_factory
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from .schemas import BulletDiff, GateNote, QueueCard, QueueDetail, StatusCount
+from .schemas import (
+    BulletDiff,
+    GateNote,
+    QueueCard,
+    QueueDetail,
+    SkillGapRow,
+    StatusCount,
+)
 
 app = FastAPI(title="JobPilot", version="0.1.0")
 
@@ -67,24 +74,58 @@ def health() -> dict:
 
 
 @app.get("/api/queue/counts", response_model=list[StatusCount])
-def queue_counts(db: Session = Depends(get_db)):
-    """Per-status totals, so the dashboard can show tabs without fetching everything."""
-    rows = db.execute(
-        select(Application.status, func.count(Application.id)).group_by(Application.status)
-    ).all()
-    return [StatusCount(status=status, count=count) for status, count in rows]
+def queue_counts(location: str | None = None, db: Session = Depends(get_db)):
+    """Per-status totals, so the dashboard can show tabs without fetching everything.
+
+    Takes the same `location` filter as the queue itself — otherwise the tab
+    badges count rows the tab would not actually show.
+    """
+    statement = (
+        select(Application.status, func.count(Application.id))
+        .join(Job, Job.id == Application.job_id)
+        .group_by(Application.status)
+    )
+    if location:
+        kinds = [k.strip() for k in location.split(",") if k.strip()]
+        statement = statement.where(Job.location_kind.in_(kinds))
+    rows = db.execute(statement).all()
+    counts = [StatusCount(status=status, count=count) for status, count in rows]
+
+    # One extra pseudo-status so the dashboard can badge the Overseas tab
+    # without a second round trip.
+    overseas = db.scalar(
+        select(func.count(Application.id))
+        .join(Job, Job.id == Application.job_id)
+        .where(Job.location_kind == "overseas")
+    )
+    counts.append(StatusCount(status="overseas", count=overseas or 0))
+    return counts
 
 
 @app.get("/api/queue", response_model=list[QueueCard])
-def list_queue(status: str | None = None, db: Session = Depends(get_db)):
+def list_queue(
+    status: str | None = None,
+    location: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """`location` accepts a comma-separated list of location kinds.
+
+    The dashboard uses it two ways: the Overseas tab asks for `overseas` alone,
+    and every other tab asks for `india,remote` so the roles the user actually
+    wants are not diluted by ones they cannot take.
+    """
     statement = (
         select(Application, Job, Company)
         .join(Job, Job.id == Application.job_id)
         .join(Company, Company.id == Job.company_id)
-        .order_by(desc(Application.created_at))
+        # India first within each page, then most recently queued.
+        .order_by((Job.location_kind != "india"), desc(Application.created_at))
     )
     if status:
         statement = statement.where(Application.status == status)
+    if location:
+        kinds = [k.strip() for k in location.split(",") if k.strip()]
+        statement = statement.where(Job.location_kind.in_(kinds))
 
     cards: list[QueueCard] = []
     for application, job, company in db.execute(statement).all():
@@ -103,6 +144,7 @@ def list_queue(status: str | None = None, db: Session = Depends(get_db)):
                 source=job.source,
                 description_quality=job.description_quality,
                 apply_url=job.apply_url,
+                location_kind=job.location_kind,
                 has_pdf=bool(run and run.pdf_path),
                 warning_count=len((run.gate_warnings or []) if run else []),
                 posted_at=job.posted_at,
@@ -110,6 +152,45 @@ def list_queue(status: str | None = None, db: Session = Depends(get_db)):
             )
         )
     return cards
+
+
+@app.get("/api/skill-gaps", response_model=list[SkillGapRow])
+def skill_gaps(min_jobs: int = 1, db: Session = Depends(get_db)):
+    """What to learn next, and who is asking for it.
+
+    Built from the `keyword_gaps` the scoring stage already records per job, so
+    it costs nothing extra. A gap never changes the resume — the whitelist gate
+    still rejects any skill the candidate has not got. This is a reading list.
+    """
+    from jobpilot_shared.canonical_facts import CanonicalFacts
+    from jobpilot_shared.db.models import Profile
+    from jobpilot_shared.skill_gaps import aggregate_gaps
+
+    profile = db.scalar(select(Profile))
+    known: tuple[str, ...] = ()
+    if profile is not None:
+        known = CanonicalFacts.model_validate(profile.canonical_facts).skills
+
+    rows: list[tuple[str, str, str, int]] = []
+    query = (
+        select(Score.verdict, Company.name, Job.title, Job.id)
+        .join(Job, Job.id == Score.job_id)
+        .join(Company, Company.id == Job.company_id)
+    )
+    for verdict, company, title, job_id in db.execute(query).all():
+        for gap in (verdict or {}).get("keyword_gaps", []):
+            if isinstance(gap, str):
+                rows.append((gap, company, title, job_id))
+
+    return [
+        SkillGapRow(
+            skill=gap.skill,
+            job_count=gap.job_count,
+            companies=gap.companies,
+            examples=gap.examples,
+        )
+        for gap in aggregate_gaps(rows, known_skills=known, min_jobs=min_jobs)
+    ]
 
 
 @app.get("/api/queue/{application_id}", response_model=QueueDetail)
@@ -151,6 +232,7 @@ def get_card(application_id: int, db: Session = Depends(get_db)):
         source=job.source,
         description_quality=job.description_quality,
         apply_url=job.apply_url,
+        location_kind=job.location_kind,
         description=job.description,
         match_score=score.match_score if score else None,
         rationale=verdict.get("rationale"),

@@ -47,6 +47,7 @@ JOB_SOURCES = (
     "remoteok",
 )
 DESCRIPTION_QUALITIES = ("full", "thin")
+LOCATION_KINDS = ("india", "remote", "overseas", "unknown")
 DISCOVERY_ORIGINS = ("seed", "aggregator")
 APPLICATION_STATUSES = (
     "queued",
@@ -140,6 +141,7 @@ class Job(Base):
         ),
         _enum_check("source", JOB_SOURCES, "ck_jobs_source"),
         _enum_check("description_quality", DESCRIPTION_QUALITIES, "ck_jobs_quality"),
+        _enum_check("location_kind", LOCATION_KINDS, "ck_jobs_location_kind"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -160,6 +162,10 @@ class Job(Base):
     description_quality: Mapped[str] = mapped_column(String(16), default="full")
     #: Sparse by design — most ATS payloads omit it. Never an input to scoring.
     salary: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: india / remote / overseas / unknown. India and remote rank first; overseas
+    #: gets its own tab rather than being dropped or mixed in.
+    location_kind: Mapped[str] = mapped_column(String(16), default="unknown", index=True)
 
     #: When the employer published the posting, per the provider. NULL when the
     #: provider exposes no date — such rows are excluded by the freshness filter

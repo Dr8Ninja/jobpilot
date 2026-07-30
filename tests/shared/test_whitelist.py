@@ -320,3 +320,40 @@ def test_target_company_does_not_whitelist_other_employers(facts: CanonicalFacts
     )
     assert isinstance(result, Rejected)
     assert "unknown_employer" in _rules(result)
+
+
+# --------------------------------------------------------------------------
+# The identity property: the user's own resume must always pass its own gate
+# --------------------------------------------------------------------------
+
+
+def test_verbatim_source_bullets_always_pass(facts: CanonicalFacts) -> None:
+    """A tailoring that changes nothing must never be rejected.
+
+    Found live: "built a training pipeline with IR_50" tripped the employer rule,
+    which meant an unmodified copy of the candidate's own resume failed the
+    fact-check. If the gate cannot pass the source document, it is miscalibrated.
+    """
+    output = TailoringOutput(
+        summary="",
+        tailored_bullets=[
+            TailoredBullet(
+                employment_index=index, original=bullet, rewritten=bullet, skills_referenced=[]
+            )
+            for index, role in enumerate(facts.employment)
+            for bullet in role.bullets
+        ],
+        skills_ordered_for_this_jd=list(facts.skills),
+    )
+    result = check(facts, output)
+    assert result.passed, getattr(result, "reasons", None)
+
+
+def test_a_technology_the_user_wrote_about_is_claimable(facts: CanonicalFacts) -> None:
+    """Prose provenance: naming something from your own bullets is not invention."""
+    bullet = facts.employment[0].bullets[0]
+    result = check(
+        facts,
+        _output(rewritten=bullet, skills_referenced=["Python"]),
+    )
+    assert result.passed, getattr(result, "reasons", None)

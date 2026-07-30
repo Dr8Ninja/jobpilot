@@ -48,11 +48,17 @@ def test_render_refuses_output_that_fails_the_gate(facts: CanonicalFacts) -> Non
 
 
 def test_html_uses_canonical_employers_and_dates(facts: CanonicalFacts) -> None:
+    """Employer, title and dates come from the facts, never from the model.
+
+    Dates are rendered the way the source resume writes them ("Jan. 2024 –
+    Present"), so the assertion is on the formatted range rather than the stored
+    ISO string — the guarantee is that it is *derived from* canonical_facts.
+    """
     html = build_html(facts, _output())
     for role in facts.employment:
         assert role.company in html
         assert role.title in html
-        assert role.start in html
+        assert role.date_range() in html
     assert "Built and shipped REST endpoints" in html
 
 
@@ -63,12 +69,19 @@ def test_html_does_not_use_tables_for_layout(facts: CanonicalFacts) -> None:
 
 
 def test_skills_section_only_contains_canonical_skills(facts: CanonicalFacts) -> None:
+    """A JD can reorder the skills block; it can never add an entry to it."""
+    import re
+
     html = build_html(facts, _output())
-    skills_line = next(line for line in html.splitlines() if 'class="skills"' in line)
-    for token in skills_line.replace('<p class="skills">', "").replace("</p>", "").split("·"):
-        token = token.strip()
-        if token:
-            assert token in facts.skills, f"{token!r} is not a canonical skill"
+    block = html.split('<div class="skills">', 1)[1].split("</div>", 1)[0]
+    text = re.sub(r"<[^>]+>", "", block)
+    # Grouped resumes render "Label : a, b, c"; ungrouped render one flat line.
+    for line in text.splitlines():
+        entries = line.split(":", 1)[-1] if ":" in line else line
+        for token in entries.split(","):
+            token = token.strip()
+            if token:
+                assert token in facts.skills, f"{token!r} is not a canonical skill"
 
 
 # --------------------------------------------------------------------------
@@ -110,7 +123,7 @@ def test_pdf_contains_canonical_employers_and_dates(
     for role in facts.employment:
         assert role.company in rendered_text
         assert role.title in rendered_text
-        assert role.start in rendered_text
+        assert role.date_range() in rendered_text
 
 
 def test_pdf_technologies_all_trace_back_to_canonical_facts(

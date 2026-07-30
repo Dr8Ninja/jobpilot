@@ -98,9 +98,32 @@ def build_html(
             facts=facts,
             output=output,
             skills=skills,
+            skill_rows=_ordered_skill_rows(facts, skills),
             bullets_by_role=bullets_by_role,
         )
     )
+
+
+def _ordered_skill_rows(facts: CanonicalFacts, ordered: list[str]) -> list[dict]:
+    """Keep the resume's own skill groups, reordering *within* each group.
+
+    Tailoring should make the relevant skill the first thing a reader sees on its
+    line — but the labels, the grouping, and the membership all stay fixed. That
+    is what keeps a tailored resume recognisably the same document, and it means
+    a JD can never introduce a group or an entry.
+    """
+    if not facts.skill_categories:
+        return []
+
+    priority = {name.casefold(): index for index, name in enumerate(ordered)}
+    rows = []
+    for category in facts.skill_categories:
+        items = sorted(
+            category.items,
+            key=lambda item: priority.get(item.casefold(), len(priority)),
+        )
+        rows.append({"label": category.label, "entries": items})
+    return rows
 
 
 def render_pdf(

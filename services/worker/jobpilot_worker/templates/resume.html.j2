@@ -1,61 +1,104 @@
-{# Single column, no tables for layout, standard fonts, real text.
-   ATS parsers read the text layer — anything clever here costs the user a match. #}
+{# Reproduces the candidate's own resume layout: centred name, contact line, then
+   EXPERIENCE / PROJECTS / EDUCATION / SKILLS in that order, each with a ruled
+   heading and dates flushed right.
+
+   Only bullet *wording* changes between tailorings. Company, title, dates,
+   location, project names, degree, and the skill groups all come straight from
+   canonical_facts, so a tailored resume is recognisably the same document. #}
 <style>
-  @page { size: Letter; margin: 0.6in 0.7in; }
+  @page { size: Letter; margin: 0.42in 0.55in; }
   body {
-    font-family: "Helvetica", "Arial", sans-serif;
-    font-size: 10.5pt;
-    line-height: 1.38;
-    color: #111;
+    font-family: "Times New Roman", "Liberation Serif", Georgia, serif;
+    font-size: 9.9pt;
+    line-height: 1.22;
+    color: #000;
   }
-  h1 { font-size: 18pt; margin: 0 0 2pt; letter-spacing: 0.2pt; }
-  .contact { font-size: 9.5pt; color: #333; margin-bottom: 10pt; }
-  .contact span + span::before { content: " · "; color: #999; }
+  .name {
+    text-align: center;
+    font-size: 19pt;
+    font-weight: bold;
+    margin: 0 0 3pt;
+    letter-spacing: 0.3pt;
+  }
+  .contact {
+    text-align: center;
+    font-size: 9.5pt;
+    margin-bottom: 8pt;
+  }
+  .contact span + span::before { content: "\00a0|\00a0"; color: #444; }
+
   h2 {
-    font-size: 10.5pt;
+    font-size: 11pt;
+    font-weight: bold;
     text-transform: uppercase;
-    letter-spacing: 0.8pt;
-    border-bottom: 0.6pt solid #999;
-    padding-bottom: 2pt;
-    margin: 13pt 0 6pt;
+    letter-spacing: 0.4pt;
+    border-bottom: 0.8pt solid #000;
+    padding-bottom: 1pt;
+    margin: 8pt 0 3pt;
   }
-  .summary { margin: 0 0 2pt; }
-  .role { margin-bottom: 9pt; }
-  .role-head { font-weight: bold; }
-  .role-meta { color: #444; font-size: 9.5pt; margin-bottom: 2pt; }
-  ul { margin: 3pt 0 0; padding-left: 15pt; }
-  li { margin-bottom: 2.5pt; }
-  .skills { margin: 0; }
+
+  /* Two-column row: detail on the left, date or location flushed right. */
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12pt;
+  }
+  .row .right { white-space: nowrap; }
+  .entry { margin-bottom: 5.5pt; }
+  .entry:last-child { margin-bottom: 0; }
+  .org { font-weight: bold; }
+  .role { font-style: italic; }
+
+  ul { margin: 2pt 0 0; padding-left: 13pt; }
+  li { margin-bottom: 1pt; text-align: justify; }
+
+  .skills p { margin: 0 0 2pt; }
+  .skills .label { font-weight: bold; }
 </style>
 
-<h1>{{ facts.identity.name }}</h1>
+<div class="name">{{ facts.identity.name }}</div>
 <div class="contact">
-  <span>{{ facts.identity.email }}</span>
   {%- if facts.identity.phone %}<span>{{ facts.identity.phone }}</span>{% endif %}
-  {%- if facts.identity.location %}<span>{{ facts.identity.location }}</span>{% endif %}
-  {%- if facts.links.linkedin %}<span>{{ facts.links.linkedin }}</span>{% endif %}
-  {%- if facts.links.github %}<span>{{ facts.links.github }}</span>{% endif %}
+  <span>{{ facts.identity.email }}</span>
+  {%- if facts.links.linkedin_handle() %}<span>{{ facts.links.linkedin_handle() }}</span>{% endif %}
 </div>
-
-{% if output.summary %}
-<h2>Summary</h2>
-<p class="summary">{{ output.summary }}</p>
-{% endif %}
-
-{% if skills %}
-<h2>Skills</h2>
-<p class="skills">{{ skills | join(" · ") }}</p>
-{% endif %}
 
 {% if facts.employment %}
 <h2>Experience</h2>
 {% for role in facts.employment %}
-<div class="role">
-  {# Employer, title, and dates come from canonical_facts, never from the model. #}
-  <div class="role-head">{{ role.title }} — {{ role.company }}</div>
-  <div class="role-meta">{{ role.start }} – {{ role.end }}</div>
+<div class="entry">
+  {# Employer, title, dates and location are canonical — never model output. #}
+  <div class="row">
+    <span class="org">{{ role.company }}</span>
+    <span class="right">{{ role.date_range() }}</span>
+  </div>
+  <div class="row">
+    <span class="role">{{ role.title }}</span>
+    {%- if role.location %}<span class="right">{{ role.location }}</span>{% endif %}
+  </div>
   <ul>
     {% for bullet in bullets_by_role.get(loop.index0, role.bullets) %}
+    <li>{{ bullet }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if facts.projects %}
+<h2>Projects</h2>
+{% for project in facts.projects %}
+<div class="entry">
+  <div class="row">
+    <span>
+      <span class="org">{{ project.name }}</span>
+      {% if project.role %}<span class="role">&nbsp;| {{ project.role }}</span>{% endif %}
+    </span>
+    <span class="right">{{ project.date_range() }}</span>
+  </div>
+  <ul>
+    {% for bullet in project.bullets %}
     <li>{{ bullet }}</li>
     {% endfor %}
   </ul>
@@ -66,9 +109,28 @@
 {% if facts.education %}
 <h2>Education</h2>
 {% for edu in facts.education %}
-<div class="role">
-  <div class="role-head">{{ edu.degree }}</div>
-  <div class="role-meta">{{ edu.institution }} — {{ edu.year }}</div>
+<div class="entry">
+  <div class="row">
+    <span class="org">{{ edu.institution }}</span>
+    <span class="right">{{ edu.date_range() }}</span>
+  </div>
+  <div class="row">
+    <span class="role">{{ edu.degree }}</span>
+    {%- if edu.location %}<span class="right">{{ edu.location }}</span>{% endif %}
+  </div>
 </div>
 {% endfor %}
 {% endif %}
+
+<h2>Skills</h2>
+<div class="skills">
+  {% if skill_rows %}
+    {# Groups keep the resume's own labels; only the ordering within a group is
+       tailored, so the block stays recognisable job to job. #}
+    {% for row in skill_rows %}
+    <p><span class="label">{{ row.label }}</span> : {{ row.entries | join(", ") }}</p>
+    {% endfor %}
+  {% else %}
+    <p>{{ skills | join(", ") }}</p>
+  {% endif %}
+</div>

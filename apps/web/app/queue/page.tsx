@@ -5,6 +5,7 @@ import {
   getCounts,
   getQueue,
   postedAge,
+  PREFERRED_LOCATIONS,
   type QueueCard,
   type StatusCount,
 } from "@/lib/api";
@@ -31,6 +32,9 @@ function Row({ card }: { card: QueueCard }) {
           <span title={card.posted_at ?? "no date from provider"}>
             posted {postedAge(card.posted_at)}
           </span>
+          {card.location_kind === "india" && <Badge>India</Badge>}
+          {card.location_kind === "remote" && <Badge>remote</Badge>}
+          {card.location_kind === "overseas" && <Badge tone="warn">overseas</Badge>}
           <Badge>{card.source}</Badge>
           {card.description_quality === "thin" && <Badge tone="warn">thin JD</Badge>}
           {card.warning_count > 0 && (
@@ -57,22 +61,27 @@ const EMPTY_COPY: Record<string, string> = {
     "Nothing shortlisted. These are scored matches that fell below the tailoring cut — open one and press Tailor this to pursue it.",
   needs_human: "Nothing needs attention — every tailored resume passed the fact-check.",
   rejected: "Nothing rejected. Anything you reject lands here and can be restored.",
+  overseas:
+    "No overseas roles yet. Anything outside India and open-remote lands here instead of being dropped.",
 };
 
 export default async function QueuePage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; view?: string }>;
 }) {
-  const { status = "queued" } = await searchParams;
-  const active = status === "all" ? "" : status;
+  const { status = "queued", view } = await searchParams;
+  // The overseas view is a location filter across every status, not a status.
+  const overseas = view === "overseas";
+  const active = overseas ? "overseas" : status === "all" ? "" : status;
+  const location = overseas ? "overseas" : PREFERRED_LOCATIONS;
 
   let cards: QueueCard[] = [];
   let counts: StatusCount[] = [];
   let error: string | null = null;
   try {
     [cards, counts] = await Promise.all([
-      getQueue(active || undefined),
+      getQueue(overseas ? undefined : active || undefined, location),
       getCounts(),
     ]);
   } catch (e) {
@@ -82,13 +91,23 @@ export default async function QueuePage({
   return (
     <div>
       <div className="mb-4 flex items-baseline justify-between">
-        <h1 className="text-[22px] font-semibold tracking-tight">Review queue</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">
+          {overseas ? "Overseas roles" : "Review queue"}
+        </h1>
         <span className="text-[13px] text-muted">
           {cards.length} application{cards.length === 1 ? "" : "s"}
         </span>
       </div>
 
       <Tabs active={active} counts={counts} />
+
+      {overseas && !error && (
+        <p className="mt-4 text-[13px] text-muted">
+          Roles outside India and open-remote. They are scored and kept, but they do not
+          spend the daily tailoring budget — open one and press <em>Tailor this</em> to
+          pursue it.
+        </p>
+      )}
 
       {error && (
         <p className="mt-4 rounded border border-[#8a2222]/25 bg-removed px-4 py-3 text-[14px]">

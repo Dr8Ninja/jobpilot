@@ -165,7 +165,7 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 ## Progress ledger (living — update at the end of every session)
 
 **Current phase:** Phase 0
-**Now working on:** Phase 0 runs live against the real resume and 75 verified boards (11,144 jobs discovered). Remaining Phase 0 item: Celery beat schedule.
+**Now working on:** Phase 0 runs live against the real resume and 94 verified boards (13,265 jobs). Selection now drops only on seniority and location; a skills gap never drops a job. Remaining Phase 0 item: Celery beat schedule.
 **Next action:** user judges tailoring quality on the live queue; then Phase 1 (assisted-apply extension).
 **Blockers:** response-rate baseline figure still not supplied. GLM-5.2/DeepSeek V4 Pro unavailable on the provided key.
 
@@ -184,11 +184,31 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 - [x] Next.js review dashboard: queue, word-level diff, approve/reject/mark-applied
 - [x] Fixture mode — full pipeline with zero API keys
 - [x] CLI: seed-companies, ingest-resume, confirm-facts, discover, run-pipeline, queue
+- [x] Resume template reproduces the user's own PDF — same sections, same skill
+      groups, one page. Only bullet wording and within-group ordering change.
+- [x] Seniority rule: reject 8+ years and staff/principal/director titles only
+      (`packages/shared/jobpilot_shared/seniority.py`)
+- [x] Location classification + Overseas tab; India and remote get the budget
+      (`packages/shared/jobpilot_shared/location.py`)
+- [x] Skills-to-learn report — `/api/skill-gaps`, dashboard at `/skills`
+- [x] Forward-deployed / AI aggregator queries; 19 more verified AI-forward boards
 
 ### In progress
 - [ ] Celery beat schedule wrapping `run_pipeline` (the last Phase 0 item)
 
 ### Decisions worth remembering
+- **A skills gap never drops a job** (user instruction, 2026-07-28). Selection
+  filters on seniority and location only, then *ranks* by score — a weak band
+  sinks, it does not disappear. The gaps feed the skills-to-learn report instead.
+  What this does **not** mean: adding a missing skill to the resume. The user
+  asked for that; it is non-negotiable #2 and was declined. Tailoring re-weights
+  what is already true.
+- **Location: unknown is overseas, never remote.** Enumerating countries, states
+  and cities never converges — "Remote - Austin" and "Düsseldorf und Remote" both
+  appeared live. The rule is inverted: a remote posting is *open* only if its
+  location field contains nothing but neutral filler words. Mislabelling an open
+  role costs one tab; mislabelling a US-only role puts an unreachable job at the
+  top of the queue.
 - **Provider is NVIDIA NIM, not Anthropic.** `z-ai/glm-5.2` and
   `deepseek-ai/deepseek-v4-pro` are *listed* by NVIDIA but never serve on this
   account (60s and 240s with no first token; an 8B model on the same key answers

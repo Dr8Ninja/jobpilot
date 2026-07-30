@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from jobpilot_shared.canonical_facts import CanonicalFacts
 from jobpilot_shared.db.models import Job, JobEmbedding
+from jobpilot_shared.seniority import is_too_senior
 from jobpilot_shared.settings import get_settings
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -129,11 +130,23 @@ def prefilter(
         cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=settings.max_posting_age_days)
         statement = statement.where(Job.posted_at.is_not(None), Job.posted_at >= cutoff)
 
-    statement = statement.order_by(distance).limit(top_k + len(exclude_job_ids or ()))
+    # Location and seniority are the only two things that can rule a job out, and
+    # both are knowable without an LLM. Applying them here means the scoring
+    # budget is spent entirely on jobs that could actually be tailored — and the
+    # shortlist tab stays a list of real options rather than staff roles.
+    if not settings.tailor_overseas:
+        statement = statement.where(Job.location_kind.in_(("india", "remote")))
+
+    # Over-fetch: the seniority check below rejects some rows, and rejected rows
+    # must not eat into the top_k the caller asked for.
+    fetch = (top_k * 3) + len(exclude_job_ids or ())
+    statement = statement.order_by(distance).limit(fetch)
 
     results: list[Candidate] = []
     for job, dist in session.execute(statement):
         if exclude_job_ids and job.id in exclude_job_ids:
+            continue
+        if is_too_senior(job.title, job.description or "", max_years=settings.max_years_required):
             continue
         results.append(Candidate(job=job, similarity=1.0 - float(dist)))
         if len(results) >= top_k:

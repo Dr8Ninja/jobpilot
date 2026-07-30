@@ -27,6 +27,8 @@ class QueueCard(BaseModel):
     source: str
     description_quality: str
     apply_url: str
+    #: india / remote / overseas / unknown — drives the Overseas tab.
+    location_kind: str
     has_pdf: bool
     warning_count: int
     #: When the employer published it. None when the provider exposes no date.
@@ -54,6 +56,7 @@ class QueueDetail(BaseModel):
     source: str
     description_quality: str
     apply_url: str
+    location_kind: str
     description: str
 
     match_score: int | None
@@ -77,3 +80,18 @@ class QueueDetail(BaseModel):
 class StatusCount(BaseModel):
     status: str
     count: int
+
+
+class SkillGapExample(BaseModel):
+    company: str
+    title: str
+    job_id: int
+
+
+class SkillGapRow(BaseModel):
+    """One entry in the skills-to-learn report."""
+
+    skill: str
+    job_count: int
+    companies: list[str]
+    examples: list[SkillGapExample]

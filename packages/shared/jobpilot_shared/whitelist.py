@@ -273,8 +273,21 @@ def _check_employers(
     if target_company:
         org_names |= normalize_all([target_company])
 
+    # Anything the candidate already wrote about themselves is theirs to say.
+    # Without this the rule fires on the user's own verbatim bullets — "built a
+    # training pipeline with IR_50" reads as an employer named IR_50 — which
+    # would make an unmodified copy of the source resume fail the gate.
+    own_words = set()
+    for span in facts.source_prose():
+        words = span.split()
+        for size in range(1, 5):
+            for i in range(len(words) - size + 1):
+                key = normalize_skill(" ".join(words[i : i + size]))
+                if key:
+                    own_words.add(key)
+
     def _is_known(key: str) -> bool:
-        if key in allowed_exact or key in org_names:
+        if key in allowed_exact or key in org_names or key in own_words:
             return True
         return len(key) >= 3 and any(name.startswith(key) for name in org_names)
 

@@ -389,3 +389,64 @@ companies:
     board_token: orca
     ats_provider: greenhouse
     # 1 postings at seed time
+
+  # --- AI-forward and forward-deployed-engineering employers ---
+  # Probed against each provider's public API on 2026-07-29; all returned
+  # live postings. Added because the user asked to target FDE and AI roles.
+  - name: ElevenLabs
+    board_token: elevenlabs
+    ats_provider: ashby
+  - name: Cohere
+    board_token: cohere
+    ats_provider: ashby
+  - name: Grafana Labs
+    board_token: grafanalabs
+    ats_provider: greenhouse
+  - name: Cresta
+    board_token: cresta
+    ats_provider: greenhouse
+  - name: LangChain
+    board_token: langchain
+    ats_provider: ashby
+  - name: Deepgram
+    board_token: deepgram
+    ats_provider: ashby
+  - name: Synthesia
+    board_token: synthesia
+    ats_provider: ashby
+  - name: Baseten
+    board_token: baseten
+    ats_provider: ashby
+  - name: Temporal Technologies
+    board_token: temporaltechnologies
+    ats_provider: greenhouse
+  - name: Fireworks AI
+    board_token: fireworksai
+    ats_provider: ashby
+  - name: Meesho
+    board_token: meesho
+    ats_provider: lever
+  - name: Snorkel AI
+    board_token: snorkelai
+    ats_provider: greenhouse
+  - name: Sardine
+    board_token: sardine
+    ats_provider: ashby
+  - name: LaunchDarkly
+    board_token: launchdarkly
+    ats_provider: greenhouse
+  - name: SambaNova Systems
+    board_token: sambanovasystems
+    ats_provider: greenhouse
+  - name: Observe.AI
+    board_token: observeai
+    ats_provider: greenhouse
+  - name: Descript
+    board_token: descript
+    ats_provider: greenhouse
+  - name: CRED
+    board_token: cred
+    ats_provider: lever
+  - name: Weaviate
+    board_token: weaviate
+    ats_provider: ashby

@@ -99,7 +99,11 @@ Tabs across the top, with live counts:
 | **Shortlist** | Scored and kept, but below the tailoring cut. Open one and press **Tailor this** to generate a resume for it on demand |
 | **Needs attention** | Tailoring could not pass the fact-check after 3 tries |
 | **Rejected** | You said no |
-| **All** | Everything |
+| **All** | Everything in India + remote |
+| **Overseas** | Roles outside India and open-remote, across every status. Kept and scored, but they do not spend the daily tailoring budget — open one and press **Tailor this** to pursue it |
+
+Every tab except **Overseas** is filtered to India and remote roles. On the right
+of the tab bar, **Skills to learn →** opens the study list (below).
 
 **Nothing is ever deleted.** Every job that gets scored produces a card — the top
 ones are tailored automatically, the rest land in **Shortlist**. Reject moves a
@@ -124,24 +128,51 @@ Set these in `.env`. Defaults in brackets.
 | Setting | [default] | What it does |
 |---|---|---|
 | `JOBPILOT_MAX_POSTING_AGE_DAYS` | `[30]` | Only postings this fresh reach the queue. `0` disables. |
-| `JOBPILOT_MAX_YEARS_REQUIRED` | `[5]` | Roles asking up to this many years still count as real opportunities. |
-| `JOBPILOT_MATCH_SCORE_THRESHOLD` | `[70]` | Minimum score to be tailored. |
+| `JOBPILOT_MAX_YEARS_REQUIRED` | `[8]` | Above this many years the role is dropped. Staff/principal/director titles are dropped regardless. |
+| `JOBPILOT_MATCH_SCORE_THRESHOLD` | `[70]` | Advisory only now — selection no longer drops anything on score. |
 | `JOBPILOT_MAX_TAILORED_PER_DAY` | `[12]` | Daily cap — the volume dial. |
 | `JOBPILOT_EMBED_TOP_K` | `[40]` | How many jobs the LLM scores per run. |
+| `JOBPILOT_TAILOR_OVERSEAS` | `[false]` | Let overseas roles spend the daily tailoring budget too. |
+| `JOBPILOT_AGGREGATOR_QUERIES` | *(9 terms)* | Comma-separated Adzuna searches. Includes forward deployed engineer, AI engineer, LLM engineer, applied AI. Each runs against India and against remote. |
 
 Want more results? Raise `MAX_POSTING_AGE_DAYS` to 60 and `EMBED_TOP_K` to 60.
-Want stricter? Raise `MATCH_SCORE_THRESHOLD` to 80.
+
+### What actually drops a job
+
+Only two things, both of which you asked for:
+
+1. **Seniority** — more than `MAX_YEARS_REQUIRED` years stated, or a
+   staff / principal / distinguished / architect / director / VP / manager title.
+2. **Location** — overseas roles do not spend the daily budget. They are not
+   dropped; they sit in the **Overseas** tab.
+
+**A skills gap never drops a job.** That was the change you asked for. A role
+asking for something you have not used is ranked lower, not deleted — tailoring
+re-emphasises what you *do* have, and the gap itself is recorded in the study
+list. Everything scored but not tailored today is in **Shortlist**.
+
+### Skills to learn
+
+**<http://localhost:3000/skills>** — every term a job description wanted that
+your resume does not cover, ranked by how many jobs asked for it, with the
+companies that asked. Filter by 1+/2+/3+/5+ jobs.
+
+This never touches your resume. The fact-check still rejects any skill that is
+not genuinely yours; this page is the reading list, so you can decide what is
+worth a weekend.
 
 ### On experience years — important
 
-`JOBPILOT_MAX_YEARS_REQUIRED=5` controls **which jobs you are shown**. It does
+`JOBPILOT_MAX_YEARS_REQUIRED=8` controls **which jobs you are shown**. It does
 *not* change what your resume claims.
 
 `experience_years` in `profile/canonical_facts.json` is `2.0`, and that is the
 honesty ceiling: the whitelist gate rejects any tailored resume claiming more.
-Raising it to 5 would let the tailoring engine write "5 years of experience" on
+Raising it to 8 would let the tailoring engine write "8 years of experience" on
 your resume, which would be a lie. These are deliberately two separate settings —
-you now see 3–5 year roles, and you apply to them truthfully as a 2-year engineer.
+you now see roles up to 8 years, and you apply to them truthfully as a 2-year
+engineer. The same principle governs skills: you now *see* jobs asking for things
+you have not used, and the resume still only ever claims what you have done.
 
 ---
 

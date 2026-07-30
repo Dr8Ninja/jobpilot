@@ -19,6 +19,21 @@ class Settings(BaseSettings):
     voyage_api_key: str = ""
     adzuna_app_id: str = ""
     adzuna_app_key: str = ""
+    #: Aggregator search terms. Each runs against India and against remote.
+    #: Forward-deployed and AI roles are here because the user asked for them by
+    #: name — they are titles an ATS-board sweep alone rarely surfaces.
+    aggregator_queries_raw: str = Field(
+        default=(
+            "software engineer,backend engineer,python developer,"
+            "forward deployed engineer,ai engineer,machine learning engineer,"
+            "llm engineer,applied ai engineer,solutions engineer"
+        ),
+        validation_alias=_jobpilot("aggregator_queries"),
+    )
+
+    @property
+    def aggregator_queries(self) -> tuple[str, ...]:
+        return tuple(q.strip() for q in self.aggregator_queries_raw.split(",") if q.strip())
 
     # Wires recorded fixtures into the real pipeline in place of live API clients.
     fixture_mode: bool = Field(default=False, validation_alias=_jobpilot("fixture_mode"))
@@ -39,9 +54,13 @@ class Settings(BaseSettings):
         default=30, validation_alias=_jobpilot("max_posting_age_days")
     )
     #: Roles asking for up to this many years still count as a real opportunity.
+    #: Above it — and at staff/principal/director titles — the role is dropped.
     #: This does NOT change what the resume claims — canonical_facts.experience_years
     #: remains the hard honesty ceiling the whitelist gate enforces.
-    max_years_required: int = Field(default=5, validation_alias=_jobpilot("max_years_required"))
+    max_years_required: int = Field(default=8, validation_alias=_jobpilot("max_years_required"))
+    #: Roles outside India/remote are kept and shown in their own tab, but they do
+    #: not consume the daily tailoring budget unless promoted by hand.
+    tailor_overseas: bool = Field(default=False, validation_alias=_jobpilot("tailor_overseas"))
 
     # "nvidia" (OpenAI-compatible NIM) or "anthropic".
     llm_provider: str = Field(default="nvidia", validation_alias=_jobpilot("llm_provider"))

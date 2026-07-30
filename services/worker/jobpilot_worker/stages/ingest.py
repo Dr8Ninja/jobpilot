@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 
 from jobpilot_shared.db.models import Company, Event, Job
+from jobpilot_shared.location import classify_location
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -154,6 +155,7 @@ def ingest_ats_job(session: Session, raw: RawJob) -> IngestReport:
         description_quality="full",
         salary=raw.salary,
         posted_at=raw.posted_at,
+        location_kind=classify_location(raw.location, description=raw.description),
         content_hash=raw.hash,
     )
     session.add(job)
@@ -237,6 +239,7 @@ def ingest_resolved_listing(session: Session, resolved: ResolvedListing) -> Inge
         description_quality=resolved.description_quality,
         salary=listing.salary,
         posted_at=listing.posted_at,
+        location_kind=classify_location(listing.location, description=resolved.description),
         content_hash=resolved.hash,
     )
     session.add(job)
@@ -277,6 +280,7 @@ def ingest_remote_listing(session: Session, source: str, listing: "RawListing") 
             description_quality="full",
             salary=listing.salary,
             posted_at=listing.posted_at,
+            location_kind=classify_location(listing.location, description=listing.snippet),
             content_hash=content_hash(listing.title, listing.location or "", listing.snippet),
         )
     )

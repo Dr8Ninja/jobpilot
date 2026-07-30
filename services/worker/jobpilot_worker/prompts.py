@@ -39,12 +39,18 @@ On seniority, the candidate is deliberately willing to stretch:
   Mark seniority_fit 'good' when the requirement is at or below their experience,
   and 'stretch' when it is above but still within {max_years} years. A stretch is
   worth applying to — do not mark it 'mismatch' and do not tank the band for it.
-- Reserve 'mismatch' for roles that are genuinely out of range: more than
-  {max_years} years required, or a staff/principal/director-level scope, or a
-  different discipline entirely.
+- Reserve 'mismatch' for exactly two cases: more than {max_years} years of
+  experience required, or a staff / principal / director / VP-level scope.
+  Nothing else is a seniority mismatch.
 
-Judge skills and domain fit on their own merits; do not let a 3-5 year
+Judge skills and domain fit on their own merits; do not let a 3-8 year
 requirement drag an otherwise strong technical match down to 'weak'.
+
+A missing skill is NOT a reason to fail the candidate. Record it in
+`keyword_gaps` — that list is what the tailoring stage emphasises against, and
+what the candidate uses to decide what to learn — then band the role on whether
+they could do the job, not on whether they tick every listed keyword. Roles the
+candidate could grow into within a few weeks are 'moderate' at worst.
 """
 
 
@@ -53,7 +59,7 @@ def build_scoring_system(max_years: int) -> str:
 
 
 #: Back-compat for callers that want the default window.
-SCORING_SYSTEM = SCORING_SYSTEM_TEMPLATE.format(max_years=5)
+SCORING_SYSTEM = SCORING_SYSTEM_TEMPLATE.format(max_years=8)
 
 
 def _facts_json(facts: CanonicalFacts) -> str:
