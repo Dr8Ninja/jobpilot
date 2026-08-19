@@ -73,3 +73,35 @@ def test_an_explicit_token_budget_overrides_the_default() -> None:
     """The retry path shrinks this until the provider accepts."""
     text = job_text(FakeJob("Backend Engineer", ENGLISH), token_budget=50)
     assert estimated_tokens(text) <= 50
+
+
+# ---------------------------------------------------------------------------
+# The query side of the prefilter, not just the documents.
+# ---------------------------------------------------------------------------
+
+
+def test_the_resume_query_is_capped_like_the_job_documents() -> None:
+    """A richer resume must not break the pipeline.
+
+    Found live: adding one project and eight skills pushed `resume_text` to 576
+    tokens. The document side was capped, the query side never was, so the whole
+    run died on a 400 the moment the candidate improved their own resume.
+    """
+    from jobpilot_shared.canonical_facts import CanonicalFacts
+    from jobpilot_worker.fixtures import SAMPLE_FACTS
+    from jobpilot_worker.stages.embed import resume_text
+
+    # A deliberately oversized profile: many skills, long bullets.
+    fat = CanonicalFacts.model_validate(
+        {
+            **SAMPLE_FACTS.model_dump(),
+            "skills": [f"Skill Number {i}" for i in range(120)],
+            "skill_categories": [],
+        }
+    )
+    raw = resume_text(fat)
+    assert estimated_tokens(raw) > EMBEDDING_TOKEN_LIMIT, "fixture must actually be oversized"
+
+    capped = fit_to_token_budget(raw, get_settings().embedding_token_budget)
+    assert estimated_tokens(capped) <= EMBEDDING_TOKEN_LIMIT
+    assert capped.startswith(fat.identity.name), "the identity line carries signal"

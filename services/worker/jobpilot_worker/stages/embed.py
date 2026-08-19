@@ -172,7 +172,12 @@ def prefilter(
     settings = get_settings()
     top_k = top_k or settings.embed_top_k
 
-    query_vector = client.embed([resume_text(facts)], input_type="query")[0]
+    # The query side needs the same cap as the document side. It was missed
+    # because a short resume fit comfortably — until the candidate added a
+    # project and eight skills, which pushed it to 576 tokens and took the whole
+    # run down with a 400. Growing your own resume must never break the pipeline.
+    query = fit_to_token_budget(resume_text(facts), settings.embedding_token_budget)
+    query_vector = client.embed([query], input_type="query")[0]
     distance = JobEmbedding.embedding.cosine_distance(query_vector)
 
     statement = (
