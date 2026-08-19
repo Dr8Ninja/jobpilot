@@ -421,7 +421,7 @@ companies:
     board_token: temporaltechnologies
     ats_provider: greenhouse
   - name: Fireworks AI
-    board_token: fireworksai
+    board_token: fireworks
     ats_provider: ashby
   - name: Meesho
     board_token: meesho

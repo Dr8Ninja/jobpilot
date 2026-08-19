@@ -96,7 +96,15 @@ def upsert_company(
 
     # Learning a board token for a company we only knew from the aggregator is
     # the registry growing — the one thing the aggregator was pulled forward for.
-    if board_token and not company.board_token:
+    #
+    # The seed file is different: it is the hand-verified registry, so it may
+    # *correct* a token as well as supply a missing one. Companies migrate ATS
+    # vendors — Fireworks AI moved its Ashby slug from `fireworksai` to
+    # `fireworks` — and without this the stale token 404s on every run forever,
+    # because re-running `seed-companies` silently changed nothing. An aggregator
+    # guess still may not overwrite a verified token.
+    authoritative = discovered_via == "seed"
+    if board_token and (not company.board_token or authoritative):
         company.board_token = board_token
         company.ats_provider = ats_provider or company.ats_provider
         session.flush()

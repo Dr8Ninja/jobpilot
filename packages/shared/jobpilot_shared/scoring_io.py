@@ -35,12 +35,21 @@ BAND_SCORES: dict[str, int] = {
 class ScoreVerdict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: Both lists are capped in the *schema*, not merely requested in the prompt.
+    #: Strict structured decoding enforces `maxItems`, and that is what actually
+    #: stops the runaway: on some inputs the model kept emitting requirement
+    #: strings until it hit the token ceiling, then padded with whitespace and
+    #: returned JSON it never closed. A bigger ceiling just makes that failure
+    #: more expensive — 6,713 characters of padding and 58 seconds in one
+    #: capture. Ten gaps is also all the skills report can usefully show.
     must_have_coverage: list[str] = Field(
         default_factory=list,
+        max_length=12,
         description="Each stated requirement marked met or missing, e.g. 'Java: met'.",
     )
     keyword_gaps: list[str] = Field(
         default_factory=list,
+        max_length=10,
         description="Terms the job asks for that the candidate's facts do not cover.",
     )
     seniority_fit: SeniorityFit = Field(
@@ -50,7 +59,10 @@ class ScoreVerdict(BaseModel):
             "'mismatch' = the role wants far more (or far less) experience."
         )
     )
-    rationale: str = Field(description="One paragraph justifying the band you are about to choose.")
+    rationale: str = Field(
+        max_length=900,
+        description="One paragraph justifying the band you are about to choose.",
+    )
     fit_band: FitBand = Field(
         description=(
             "Overall fit. "

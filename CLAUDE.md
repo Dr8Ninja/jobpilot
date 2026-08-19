@@ -204,6 +204,28 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
   falling back to the original wording otherwise, so the count and order can
   never depend on the model. Surplus bullets are dropped too: the resume must not
   grow either.
+- **Token budgets are not character budgets.** 62 postings were silently dropped
+  every run because `nv-embedqa-e5-v5` counts tokens and the code counted
+  characters. English runs ~4 chars/token; Japanese and Korean run ~2.5 *tokens
+  per character*, so a 1600-char budget was ~400 tokens of English and ~1600 of
+  Japanese, and every CJK posting was rejected with a 400. The weights in
+  `estimated_tokens` were calibrated against the provider's own rejection
+  messages, which report the true count. Trim by estimated tokens, then shrink on
+  failure — a single halving did not converge.
+- **"Invalid payload" usually is not the schema.** Nemotron logged repeated
+  `ScoreVerdict` validation failures; the real cause was `finish_reason=length`.
+  On roughly one input in five it stops mid-object and pads with whitespace to
+  whatever ceiling it is given — 6,713 characters of padding in one capture,
+  burning all 8,000 tokens and 58s to return an unparseable body. The ceiling is
+  what a runaway costs, not what a good answer needs (real ones use 848-2,297),
+  so `scoring_max_tokens` is 3,000 and truncation is now a named, retried error.
+- **Benchmark the account, not the leaderboard.** Re-measuring all 102 served
+  models against the *real* schemas moved tailoring from `openai/gpt-oss-120b`
+  (106-180s, frequent timeouts) to `nvidia/nemotron-3-super-120b-a12b` (20-79s,
+  8/8 bullets every run) and made scoring reliable at 8-15s. The earlier note
+  that nemotron "returns an empty tailoring" was true only of the old prompt;
+  once the prompt stated a per-role bullet budget the same model answered fully.
+  Re-test a model after changing its prompt before writing it off.
 - **A fallback is only a fallback if the next model does the work.** Measured on
   this account: `nvidia/nemotron-3-super-120b-a12b` (2.6s) and
   `openai/gpt-oss-20b` (16s) both answer a *tailoring* request with a

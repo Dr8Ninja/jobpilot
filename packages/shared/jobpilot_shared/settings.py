@@ -72,7 +72,8 @@ class Settings(BaseSettings):
     # are listed by NVIDIA but never return a token on the free tier — set them
     # here if that changes.
     tailoring_model: str = Field(
-        default="openai/gpt-oss-120b", validation_alias=_jobpilot("tailoring_model")
+        default="nvidia/nemotron-3-super-120b-a12b",
+        validation_alias=_jobpilot("tailoring_model"),
     )
     scoring_model: str = Field(
         default="nvidia/nemotron-3-super-120b-a12b",
@@ -83,7 +84,7 @@ class Settings(BaseSettings):
     )
     #: Tried in order when the requested model times out or is not served.
     llm_fallback_models: str = Field(
-        default="openai/gpt-oss-120b,nvidia/nemotron-3-super-120b-a12b",
+        default="nvidia/nemotron-3-ultra-550b-a55b,openai/gpt-oss-120b",
         validation_alias=_jobpilot("llm_fallback_models"),
     )
     #: 90s cut `openai/gpt-oss-120b` off mid-answer under load — measured at 54s
@@ -99,14 +100,15 @@ class Settings(BaseSettings):
     llm_retry_backoff_seconds: float = Field(
         default=8.0, validation_alias=_jobpilot("llm_retry_backoff_seconds")
     )
-    #: Tailoring gets its own (empty) chain. Measured on this account: every
-    #: fallback answers a tailoring request with a schema-valid but EMPTY
-    #: `tailored_bullets` list. That is worse than a timeout — it looks like
-    #: success, consumes the attempt, and yields an untailored resume. Retrying
-    #: the primary is strictly better. Scoring keeps the shared chain, where the
-    #: same models return correct categorical verdicts.
+    #: Tailoring keeps its own chain. It was emptied when every fallback answered
+    #: with a schema-valid but EMPTY `tailored_bullets` list — but that was the
+    #: old prompt, which invited the model to omit bullets. With the explicit
+    #: per-role budget in place, both models below return a complete 8/8 answer,
+    #: so a fallback is worth having again. The completeness check is what makes
+    #: it safe: an empty reply is now retried rather than accepted.
     tailoring_fallback_models: str = Field(
-        default="", validation_alias=_jobpilot("tailoring_fallback_models")
+        default="nvidia/nemotron-3-ultra-550b-a55b,openai/gpt-oss-120b",
+        validation_alias=_jobpilot("tailoring_fallback_models"),
     )
 
     # "nvidia" reuses the chat key; "voyage" needs a separate pa-... key.
@@ -120,6 +122,15 @@ class Settings(BaseSettings):
     #: interchangeable without a migration or a reindex.
     embedding_dimensions: int = 1024
     #: nv-embedqa-e5-v5 hard-caps at 512 tokens; ~1600 chars keeps a safety margin.
+    #: Ceiling on *estimated* tokens per embedding input. The provider's hard
+    #: limit is 512; the margin absorbs the estimate being approximate, because a
+    #: rejection costs the whole row while a few trimmed characters cost nothing.
+    #: 440 still let two batches through at an actual 576, so the margin is wider
+    #: than the arithmetic suggests it needs to be. The prefilter only ranks —
+    #: the LLM scorer reads the full description later.
+    embedding_token_budget: int = Field(
+        default=380, validation_alias=_jobpilot("embedding_token_budget")
+    )
     embedding_char_budget: int = Field(
         default=1600, validation_alias=_jobpilot("embedding_char_budget")
     )
@@ -140,7 +151,11 @@ class Settings(BaseSettings):
 
     # Claude Sonnet 5 runs adaptive thinking by default and max_tokens caps
     # thinking + output together, so these carry headroom above the JSON payload.
-    scoring_max_tokens: int = 8000
+    #: Real scoring answers measured at 848-2,297 completion tokens. The ceiling
+    #: is what a runaway costs, not what a good answer needs: nemotron pads with
+    #: whitespace to whatever ceiling it is given, so 8,000 bought nothing but a
+    #: 58-second failure. 3,000 leaves comfortable headroom and caps the waste.
+    scoring_max_tokens: int = 3000
     tailoring_max_tokens: int = 16000
     extraction_max_tokens: int = 16000
 

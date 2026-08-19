@@ -31,6 +31,10 @@ class OpenAICompatError(RuntimeError):
     """Every configured model failed for this request."""
 
 
+class TruncatedCompletion(RuntimeError):
+    """The model ran out of output budget before closing its JSON object."""
+
+
 def _strictify(schema: dict[str, Any]) -> dict[str, Any]:
     """Make a Pydantic JSON schema acceptable to strict structured-output mode.
 
@@ -118,10 +122,21 @@ class OpenAICompatLLMClient:
                 "json_schema": {"name": "output", "schema": schema, "strict": True},
             },
         )
-        content = response.choices[0].message.content or ""
+        choice = response.choices[0]
+        content = choice.message.content or ""
         if not content.strip():
             raise OpenAICompatError(f"{model} returned an empty body")
-        return content
+        if getattr(choice, "finish_reason", None) == "length":
+            # Measured on nemotron-3-super: on roughly one input in five it stops
+            # emitting JSON mid-object and pads with whitespace to the token
+            # ceiling — 6,713 characters of it in one capture, burning all 8,000
+            # tokens and 58 seconds to return an unparseable body. Naming the
+            # cause beats letting it surface as a mystery validation error.
+            raise TruncatedCompletion(
+                f"{model} hit the {max_tokens}-token ceiling before closing the JSON"
+            )
+        # Some models pad the body with trailing whitespace after valid JSON.
+        return content.strip()
 
     def parse(
         self,
@@ -140,9 +155,22 @@ class OpenAICompatLLMClient:
                 started = time.monotonic()
                 try:
                     body = self._call(candidate, max_tokens, system, prompt, schema)
+                except TruncatedCompletion as exc:
+                    errors.append(f"{candidate}: {exc}")
+                    # Debug, not warning: this is a handled, transient condition
+                    # that the retry below almost always clears — 20 of them in a
+                    # 39-job run, none of which cost a verdict. If every attempt
+                    # is exhausted the aggregate error is raised and logged by the
+                    # caller, so a real failure is still loud.
+                    log.debug("%s: %s (attempt %s)", candidate, exc, attempt)
+                    continue  # same model, ask again — this is input-specific
                 except Exception as exc:  # timeout, 5xx, 404 for an unserved model
                     elapsed = time.monotonic() - started
-                    errors.append(f"{candidate}: {type(exc).__name__} after {elapsed:.0f}s")
+                    # Keep our own diagnosis ("returned an empty body"); a bare
+                    # type name is enough for a timeout but throws away the
+                    # reason when we were the one who raised.
+                    detail = f"{exc}" if isinstance(exc, OpenAICompatError) else type(exc).__name__
+                    errors.append(f"{candidate}: {detail} after {elapsed:.0f}s")
                     log.warning(
                         "LLM call failed on %s after %.0fs (%s); trying next",
                         candidate,

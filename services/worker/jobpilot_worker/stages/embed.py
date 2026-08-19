@@ -36,17 +36,85 @@ def resume_text(facts: CanonicalFacts) -> str:
     return "\n".join(parts)
 
 
-def job_text(job: Job, char_budget: int | None = None) -> str:
+#: Hard cap of `nv-embedqa-e5-v5`. Everything below aims safely under it.
+EMBEDDING_TOKEN_LIMIT = 512
+#: Measured from the provider's rejection messages — see `estimated_tokens`.
+NON_ASCII_TOKENS_PER_CHAR = 2.5
+
+
+def estimated_tokens(text: str) -> int:
+    """Rough token count that is honest about non-Latin scripts.
+
+    A character budget alone was wrong, and it failed on real data: English
+    prose runs about 4 characters per token, but Japanese and Korean run closer
+    to *one token per character*. A 1600-character budget is ~400 tokens of
+    English and ~1600 tokens of Japanese, so every CJK posting was rejected —
+    62 of them in one run, including whole boards like Datadog Tokyo.
+
+    The weights are calibrated against the provider's own rejection messages,
+    which report the true token count: solving for the per-character cost across
+    six rejected Japanese and Korean postings gave 1.88-2.25 tokens per non-ASCII
+    character. 2.5 is used here so the estimate errs high — an over-estimate
+    costs a few characters of context, an under-estimate costs the whole row.
+    """
+    ascii_chars = sum(1 for c in text if ord(c) < 128)
+    return int(ascii_chars / 4 + (len(text) - ascii_chars) * NON_ASCII_TOKENS_PER_CHAR)
+
+
+def fit_to_token_budget(text: str, token_budget: int) -> str:
+    """Trim text until its estimated token count fits, by binary search."""
+    if estimated_tokens(text) <= token_budget:
+        return text
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if estimated_tokens(text[:mid]) <= token_budget:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low]
+
+
+def job_text(job: Job, char_budget: int | None = None, token_budget: int | None = None) -> str:
     """Text handed to the embedding model.
 
-    Embedding models have a hard input cap — `nv-embedqa-e5-v5` rejects anything
-    over 512 tokens outright, and a full JD is routinely 2-4x that. This is only
-    the cheap pre-filter, so truncation is fine: the title and the opening of the
+    Two caps apply. The character budget keeps English JDs to a sensible prefix;
+    the token budget is the one the provider actually enforces. This is only the
+    cheap pre-filter, so truncation is fine — the title and the opening of the
     description carry the signal, and the LLM scorer later reads the whole thing.
     """
-    budget = char_budget or get_settings().embedding_char_budget
+    settings = get_settings()
+    budget = char_budget or settings.embedding_char_budget
     header = f"{job.title}\n{job.location or ''}\n\n"
-    return (header + job.description)[:budget]
+    text = (header + job.description)[:budget]
+    # Leave headroom: the estimate is approximate and a rejection costs the row.
+    return fit_to_token_budget(text, token_budget or settings.embedding_token_budget)
+
+
+def _embed_one(client: EmbeddingClient, job: Job) -> list[float] | None:
+    """Embed one job, shrinking the budget until the provider accepts it.
+
+    `job_text` already trims to an estimated token budget, but the estimate is a
+    heuristic — a posting full of emoji, rare scripts or long unbroken tokens can
+    still come in over the limit. Halving repeatedly converges for any text,
+    where the previous single halving did not: a Japanese JD trimmed from 1600 to
+    800 characters was still ~700 tokens and was dropped outright.
+    """
+    settings = get_settings()
+    token_budget = settings.embedding_token_budget
+    last: Exception | None = None
+    for _ in range(4):
+        try:
+            return client.embed([job_text(job, token_budget=token_budget)], input_type="document")[
+                0
+            ]
+        except Exception as exc:
+            last = exc
+            token_budget //= 2
+    log.warning(
+        "Could not embed job %s after shrinking to %s tokens: %s", job.id, token_budget, last
+    )
+    return None
 
 
 def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size: int = 32) -> int:
@@ -63,7 +131,6 @@ def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size:
 
     settings = get_settings()
     model = settings.embedding_model
-    budget = settings.embedding_char_budget
     embedded = 0
     for start in range(0, len(pending), batch_size):
         batch = pending[start : start + batch_size]
@@ -76,19 +143,9 @@ def embed_pending_jobs(session: Session, client: EmbeddingClient, *, batch_size:
             log.warning("Embedding batch failed (%s); retrying individually", exc)
             pairs = []
             for job in batch:
-                try:
-                    vector = client.embed([job_text(job)], input_type="document")[0]
+                vector = _embed_one(client, job)
+                if vector is not None:
                     pairs.append((job, vector))
-                except Exception:
-                    # Some descriptions tokenize far denser than the usual
-                    # ~4 chars/token, so a budget that is safe on average still
-                    # overflows on outliers. Halve once before giving up.
-                    try:
-                        short = job_text(job, char_budget=budget // 2)
-                        vector = client.embed([short], input_type="document")[0]
-                        pairs.append((job, vector))
-                    except Exception as inner:
-                        log.warning("Could not embed job %s: %s", job.id, inner)
 
         for job, vector in pairs:
             session.add(JobEmbedding(job_id=job.id, embedding=vector, model=model))

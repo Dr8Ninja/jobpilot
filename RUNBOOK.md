@@ -176,6 +176,24 @@ you have not used, and the resume still only ever claims what you have done.
 
 ---
 
+## Models
+
+Picked by benchmarking your NVIDIA key against the real schemas, not by
+reputation. Both tasks run on `nvidia/nemotron-3-super-120b-a12b`, with
+`nemotron-3-ultra` and `gpt-oss-120b` behind it. Override in `.env` with
+`JOBPILOT_TAILORING_MODEL` / `JOBPILOT_SCORING_MODEL`.
+
+If scoring starts logging "invalid payload", check for `finish_reason=length`
+before blaming the schema — it usually means the model ran out of output budget
+mid-JSON. Raise `JOBPILOT_SCORING_MAX_TOKENS`.
+
+Non-English postings: the embedding cap is counted in *tokens*, and Japanese and
+Korean cost ~2.5 tokens per character. `JOBPILOT_EMBEDDING_TOKEN_BUDGET` (440)
+trims those much shorter than English so they still embed instead of being
+dropped.
+
+---
+
 ## If a run fails
 
 Nothing in a run is all-or-nothing any more. Stages commit as they finish, and a

@@ -141,3 +141,69 @@ def test_application_status_check_constraint(db) -> None:
     db.add(Application(job_id=job.id, status="not_a_real_status"))
     with pytest.raises(IntegrityError):
         db.flush()
+
+
+def test_the_seed_file_may_correct_a_stale_board_token(db) -> None:
+    """Companies migrate ATS vendors, and the seed file is the verified registry.
+
+    Fireworks AI moved its Ashby slug from `fireworksai` to `fireworks`. Before
+    this, re-running `seed-companies` reported success and changed nothing, so
+    the dead token 404'd on every run forever.
+    """
+    from jobpilot_worker.stages.ingest import upsert_company
+
+    first = upsert_company(
+        db,
+        "Fireworks AI",
+        ats_provider="ashby",
+        board_token="fireworksai",
+        discovered_via="seed",
+    )
+    assert first.board_token == "fireworksai"
+
+    second = upsert_company(
+        db,
+        "Fireworks AI",
+        ats_provider="ashby",
+        board_token="fireworks",
+        discovered_via="seed",
+    )
+    assert second.id == first.id, "the company must be updated, not duplicated"
+    assert second.board_token == "fireworks"
+
+
+def test_an_aggregator_guess_never_overwrites_a_verified_token(db) -> None:
+    """The conservative half of the rule: only the seed file is authoritative."""
+    from jobpilot_worker.stages.ingest import upsert_company
+
+    upsert_company(
+        db,
+        "Acme Corp",
+        ats_provider="greenhouse",
+        board_token="acme",
+        discovered_via="seed",
+    )
+    guessed = upsert_company(
+        db,
+        "Acme Corp",
+        ats_provider="lever",
+        board_token="acme-guess",
+        discovered_via="aggregator",
+    )
+    assert guessed.board_token == "acme"
+    assert guessed.ats_provider == "greenhouse"
+
+
+def test_the_aggregator_may_still_supply_a_missing_token(db) -> None:
+    """Registry growth is the reason the aggregator was pulled into Phase 0."""
+    from jobpilot_worker.stages.ingest import upsert_company
+
+    upsert_company(db, "Beta Inc", discovered_via="aggregator")
+    grown = upsert_company(
+        db,
+        "Beta Inc",
+        ats_provider="greenhouse",
+        board_token="beta",
+        discovered_via="aggregator",
+    )
+    assert grown.board_token == "beta"

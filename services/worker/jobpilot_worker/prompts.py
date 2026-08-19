@@ -95,6 +95,8 @@ Title: {title}
 
 Score this match. `keyword_gaps` should list terms the job asks for that the
 candidate's facts do not cover — those become emphasis hints for tailoring.
+List at most 10, each a short skill name rather than a phrase. Keep `rationale`
+to a few sentences; a long answer risks being cut off before it is complete.
 """
 
 
