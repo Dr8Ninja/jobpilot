@@ -3,6 +3,32 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+const POLL_INTERVAL_MS = 1_500;
+/** Worst case is `max_tailoring_attempts` x `llm_timeout_seconds`, plus slack. */
+const POLL_TIMEOUT_MS = 15 * 60 * 1_000;
+
+/** Follow a background run to its end. Resolves when it succeeds, throws when
+ * it does not — a run that failed has a reason, and the reason is the point. */
+async function waitForRun(runId: number): Promise<void> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  for (;;) {
+    const response = await fetch(`/api/v1/runs/${runId}`, { cache: "no-store" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail ?? `Could not read run ${runId}`);
+    }
+    const run = await response.json();
+    if (run.status === "succeeded") return;
+    if (run.status === "failed") {
+      throw new Error(run.error ?? "The run failed.");
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`Run ${runId} is still going. Check back shortly.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+}
+
 export function Actions({
   applicationId,
   status,
@@ -30,6 +56,13 @@ export function Actions({
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.detail ?? `Failed (${response.status})`);
+      }
+      // Tailoring is queued, not done: up to three LLM attempts at 180s each is
+      // far longer than this request could stay open, so the server hands back a
+      // run to follow instead of a result.
+      if (action === "tailor") {
+        const { run_id: runId } = await response.json();
+        await waitForRun(runId);
       }
       router.refresh();
     } catch (e) {

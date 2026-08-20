@@ -1,0 +1,49 @@
+# JobPilot worker.
+#
+# Same image contents as the API: the worker renders PDFs too, so it needs the
+# identical Pango and font stack. It differs only in what it runs.
+#
+# One image, two commands. `celery ... worker` executes runs; `celery ... beat`
+# is the nightly schedule. Run exactly one beat — two schedulers means two
+# pipelines a night, and volume is a bounded dial (CLAUDE.md non-negotiable #4).
+
+FROM ghcr.io/astral-sh/uv:0.11-python3.13-bookworm-slim
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz0b \
+        libfribidi0 \
+        shared-mime-info \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY packages ./packages
+COPY services ./services
+COPY infra ./infra
+COPY migrations ./migrations
+COPY alembic.ini ./
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+RUN useradd --create-home --uid 10001 jobpilot \
+    && mkdir -p /app/storage/resumes \
+    && chown -R jobpilot:jobpilot /app/storage
+USER jobpilot
+VOLUME ["/app/storage"]
+
+# `--concurrency=1` is deliberate. A tailoring is one long LLM call, the daily
+# cap is ~12, and the provider is intermittent enough that hammering it in
+# parallel fails calls that succeed when spaced out.
+CMD ["celery", "-A", "jobpilot_worker.celery_app", "worker", \
+     "--loglevel=info", "--concurrency=1"]

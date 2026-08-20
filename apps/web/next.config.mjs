@@ -1,14 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  async rewrites() {
-    // Proxy to FastAPI so the browser talks to one origin.
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${process.env.JOBPILOT_API_URL ?? "http://127.0.0.1:8000"}/api/:path*`,
-      },
-    ];
-  },
+  // No `rewrites()` here any more. `app/api/[...path]/route.ts` proxies to
+  // FastAPI instead, because a rewrite cannot attach the bearer token the API
+  // expects once auth is switched on — and that token must stay on the server,
+  // never in the browser.
 };
 
 export default nextConfig;

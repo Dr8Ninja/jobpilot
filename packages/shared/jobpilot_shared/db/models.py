@@ -49,6 +49,12 @@ JOB_SOURCES = (
 DESCRIPTION_QUALITIES = ("full", "thin")
 LOCATION_KINDS = ("india", "remote", "overseas", "unknown")
 DISCOVERY_ORIGINS = ("seed", "aggregator")
+#: What a background run is doing. `pipeline` is the whole nightly pass;
+#: `discovery` stops after ingest; `tailor` is one on-demand card.
+RUN_KINDS = ("pipeline", "discovery", "tailor")
+#: `pending` is enqueued-but-unclaimed. A run that ends in `failed` keeps its
+#: error rather than disappearing, which is the whole reason the table exists.
+RUN_STATUSES = ("pending", "running", "succeeded", "failed")
 APPLICATION_STATUSES = (
     "queued",
     "approved",
@@ -237,6 +243,12 @@ class Application(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
+    #: Who this belongs to. Nullable because rows predate the column: a NULL
+    #: means "unowned", and the owner still sees it. Dropping such a row out of
+    #: the queue would be a deletion by another name.
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     tailoring_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("tailoring_runs.id", ondelete="SET NULL"), nullable=True
     )
@@ -244,6 +256,36 @@ class Application(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PipelineRun(Base):
+    """One invocation of a background stage, whether enqueued or run inline.
+
+    Long work no longer happens inside a request handler, so the status of that
+    work needs somewhere to live that outlives the caller. `POST /api/v1/runs`
+    creates a row and returns immediately; `GET /api/v1/runs/{id}` reads it back.
+    The CLI writes the same row when it runs inline, so a run started from a
+    terminal is just as visible as one started from the dashboard.
+    """
+
+    __tablename__ = "pipeline_runs"
+    __table_args__ = (
+        _enum_check("kind", RUN_KINDS, "ck_pipeline_runs_kind"),
+        _enum_check("status", RUN_STATUSES, "ck_pipeline_runs_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    #: Inputs the run was started with — e.g. the application id for a `tailor`.
+    params: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: The PipelineReport, as JSON, once there is one.
+    summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Populated only on failure. A run that blew up is still a run.
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

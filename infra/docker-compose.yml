@@ -1,0 +1,82 @@
+# How the pieces fit together. The dev machine has no Docker, so this is
+# documentation that happens to be executable rather than something run daily.
+#
+# Migrations are not run automatically. `alembic upgrade head` is a deliberate
+# step: this database holds every job, score and approved resume, and nothing in
+# it is ever deleted.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: jobpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: jobpilot
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobpilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    env_file: [../.env]
+    environment:
+      JOBPILOT_DATABASE_URL: postgresql+psycopg://jobpilot:${POSTGRES_PASSWORD}@postgres:5432/jobpilot
+      JOBPILOT_REDIS_URL: redis://redis:6379/0
+    ports: ["8000:8000"]
+    volumes:
+      - resume-storage:/app/storage
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    env_file: [../.env]
+    environment:
+      JOBPILOT_DATABASE_URL: postgresql+psycopg://jobpilot:${POSTGRES_PASSWORD}@postgres:5432/jobpilot
+      JOBPILOT_REDIS_URL: redis://redis:6379/0
+    volumes:
+      # The API serves PDFs the worker wrote, by the path stored in the
+      # database. They must share the volume or every download 404s.
+      - resume-storage:/app/storage
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  beat:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    command: ["celery", "-A", "jobpilot_worker.celery_app", "beat", "--loglevel=info"]
+    env_file: [../.env]
+    environment:
+      JOBPILOT_DATABASE_URL: postgresql+psycopg://jobpilot:${POSTGRES_PASSWORD}@postgres:5432/jobpilot
+      JOBPILOT_REDIS_URL: redis://redis:6379/0
+    # Exactly one. A second scheduler means a second nightly pipeline.
+    deploy: {replicas: 1}
+    depends_on:
+      redis: {condition: service_healthy}
+
+volumes:
+  postgres-data:
+  redis-data:
+  resume-storage:

@@ -76,22 +76,51 @@ export const PREFERRED_LOCATIONS = "india,remote";
 
 const BASE = process.env.JOBPILOT_API_URL ?? "http://127.0.0.1:8000";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, { cache: "no-store", ...init });
+/** These calls run on the Next server during rendering, so the token is read
+ *  from the server environment and never reaches the browser. The dashboard's
+ *  own action buttons go through `app/api/[...path]/route.ts` for the same
+ *  reason. */
+function authHeaders(): HeadersInit {
+  const token = process.env.JOBPILOT_API_TOKEN;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function raw(path: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(`${BASE}${path}`, {
+    cache: "no-store",
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers ?? {}) },
+  });
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }));
     throw new Error(body.detail ?? `Request failed: ${response.status}`);
   }
-  return response.json() as Promise<T>;
+  return response;
 }
 
-export const getQueue = (status?: string, location = PREFERRED_LOCATIONS) => {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await raw(path, init)).json() as Promise<T>;
+}
+
+/** The API caps a page; asking for the cap keeps today's queue whole. */
+export const QUEUE_PAGE_SIZE = 500;
+
+/** `total` is the unpaginated count, so a truncated page can say so rather than
+ *  looking like a queue that quietly got shorter. */
+export async function getQueue(
+  status?: string,
+  location = PREFERRED_LOCATIONS,
+  limit = QUEUE_PAGE_SIZE,
+): Promise<{ cards: QueueCard[]; total: number }> {
   const query = new URLSearchParams();
   if (status) query.set("status", status);
   if (location) query.set("location", location);
-  const suffix = query.toString();
-  return request<QueueCard[]>(`/api/queue${suffix ? `?${suffix}` : ""}`);
-};
+  query.set("limit", String(limit));
+  const response = await raw(`/api/queue?${query.toString()}`);
+  const cards = (await response.json()) as QueueCard[];
+  const total = Number(response.headers.get("X-Total-Count") ?? cards.length);
+  return { cards, total };
+}
 export const getCounts = (location = PREFERRED_LOCATIONS) =>
   request<StatusCount[]>(
     `/api/queue/counts${location ? `?location=${encodeURIComponent(location)}` : ""}`,

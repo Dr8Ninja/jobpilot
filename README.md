@@ -49,7 +49,7 @@ Open <http://localhost:3000/queue>.
 1. Copy `.env.example` to `.env` and fill in `NVIDIA_API_KEY` and the Adzuna pair.
    Set `JOBPILOT_FIXTURE_MODE=0`. Embeddings run on the same NVIDIA key, so no
    second provider is needed.
-2. `infra/seed_companies.yaml` already carries 75 verified boards. Add your own
+2. `infra/seed_companies.yaml` already carries 94 verified boards. Add your own
    targets and re-run `seed-companies` (idempotent).
 3. Ingest your actual resume:
 
@@ -77,7 +77,7 @@ All documented, public JSON APIs. Nothing here is scraped.
 | Remotive, Arbeitnow, RemoteOK | Global/remote boards | none |
 | Adzuna | Aggregator (India + worldwide) | free API key |
 
-`infra/seed_companies.yaml` ships **75 verified board tokens** (~11k live postings).
+`infra/seed_companies.yaml` ships **94 verified board tokens** (~17.8k live postings).
 Every token was probed against its provider before being written to the file — none
 are guessed. Tokens go stale as companies switch ATS vendors; a dead one is logged
 and skipped, never fatal.
@@ -123,13 +123,15 @@ from the model.
 ## Commands
 
 ```bash
-uv run jobpilot version           # config and active dials
-uv run jobpilot seed-companies    # load the Greenhouse board registry
-uv run jobpilot ingest-resume     # resume PDF -> profile/canonical_facts.json
-uv run jobpilot confirm-facts     # validate and load into Postgres
-uv run jobpilot discover          # discovery + dedupe only
-uv run jobpilot run-pipeline      # the whole loop
-uv run jobpilot queue             # print the review queue
+uv run jobpilot version              # config and active dials
+uv run jobpilot seed-companies       # load the ATS board registry
+uv run jobpilot ingest-resume        # resume PDF -> profile/canonical_facts.json
+uv run jobpilot confirm-facts        # validate and load into Postgres
+uv run jobpilot discover             # discovery + dedupe only
+uv run jobpilot run-pipeline         # the whole loop, inline (unchanged)
+uv run jobpilot run-pipeline --enqueue  # hand it to the worker instead
+uv run jobpilot run-status <id>      # how a background run ended
+uv run jobpilot queue                # print the review queue
 ```
 
 Quality gates:
@@ -140,7 +142,64 @@ uv run pytest
 cd apps/web && npm run typecheck && npm run test && npm run build
 ```
 
-Database tests need Postgres; they skip cleanly if it is unreachable.
+Database tests need Postgres; they skip cleanly if it is unreachable. CI sets
+`JOBPILOT_REQUIRE_POSTGRES=1`, which turns that skip into a failure — a run where
+every database test skipped is not a pass.
+
+GitHub Actions runs exactly these gates on every push and pull request
+(`.github/workflows/ci.yml`), plus one more: migrations must apply cleanly to an
+empty database. The test suite builds its tables from model metadata rather than
+from Alembic, so it cannot see a model that was changed without a migration.
+
+## Running it as a service
+
+Phase 0 ran everything inline. Long work now happens on a worker, so a pipeline
+run survives the terminal that started it and tailoring no longer blocks a
+request for up to nine minutes.
+
+```bash
+brew install redis && brew services start redis
+
+# In separate terminals, alongside the API:
+celery -A jobpilot_worker.celery_app worker --loglevel=info --concurrency=1
+celery -A jobpilot_worker.celery_app beat   --loglevel=info   # the nightly run
+```
+
+Beat triggers the whole pipeline at 02:00 by default
+(`JOBPILOT_NIGHTLY_RUN_HOUR`, `JOBPILOT_NIGHTLY_RUN_MINUTE`), and
+`JOBPILOT_NIGHTLY_RUN_ENABLED=0` turns it off entirely. Run **one** beat process:
+two schedulers means two pipelines a night, and volume is a bounded dial.
+
+Trigger and poll runs over HTTP:
+
+```bash
+curl -X POST localhost:8000/api/v1/runs -H 'content-type: application/json' \
+     -d '{"kind":"pipeline"}'
+curl localhost:8000/api/v1/runs/1
+```
+
+The API is served at `/api/v1`; the original unprefixed `/api` paths still route,
+so nothing that already worked stopped working.
+
+`infra/Dockerfile.api`, `infra/Dockerfile.worker` and `infra/docker-compose.yml`
+package the same thing. CI builds both images on every push, because this
+machine has no Docker and that job is the only place they are ever exercised.
+
+### Locking it down
+
+Auth is **off by default**, because this has always been a localhost tool and
+turning a lock on by surprise locks you out of your own queue. Before the port is
+reachable from anywhere else:
+
+```bash
+JOBPILOT_AUTH_ENABLED=1
+JOBPILOT_API_TOKEN=<a long random string>
+```
+
+The API then refuses any request without `Authorization: Bearer <token>`, except
+`/health`. It refuses to start at all if auth is on and the token is empty. The
+dashboard reads the same token from its own server environment and attaches it
+server-side, so it never reaches the browser.
 
 ## What Phase 0 deliberately does not do
 
@@ -151,13 +210,17 @@ outcome is recorded for the baseline.
 
 ## Models
 
-Defaults were chosen by benchmarking the configured key, not by reputation:
+Everything runs on one NVIDIA NIM key — there is no separate embeddings
+provider. Defaults were chosen by benchmarking the configured key, not by
+reputation: re-measuring all 102 served models against the real schemas is what
+moved tailoring off `openai/gpt-oss-120b`, which took 106-180s and timed out
+often.
 
 | Role | Model | Why |
 |---|---|---|
-| Scoring | `nvidia/nemotron-3-super-120b-a12b` | strict JSON in ~3s, correctly calibrated |
-| Tailoring | `openai/gpt-oss-120b` | strongest rewriting of the fast options |
-| Embeddings | `nvidia/nv-embedqa-e5-v5` | 1024-dim, same width as voyage-3 |
+| Scoring | `nvidia/nemotron-3-super-120b-a12b` | strict JSON in 8-15s, correctly calibrated |
+| Tailoring | `nvidia/nemotron-3-super-120b-a12b` | 20-79s, a complete 8/8 rewrite every run |
+| Embeddings | `nvidia/nv-embedqa-e5-v5` | 1024-dim, on the same NVIDIA key |
 
 `z-ai/glm-5.2` and `deepseek-ai/deepseek-v4-pro` are listed by NVIDIA but never
 returned a token on this account (60s and 240s timeouts, while an 8B model on the

@@ -6,6 +6,7 @@ from jobpilot_shared.canonical_facts import (
     Identity,
     Links,
 )
+from jobpilot_shared.settings import get_settings
 
 # Deliberately synthetic. No real personal data lives in fixtures (non-negotiable #5).
 
@@ -65,5 +66,18 @@ def facts() -> CanonicalFacts:
     )
 
 
+@pytest.fixture(autouse=True)
+def fresh_settings():
+    """Settings are a process-wide singleton, so a test that patches the
+    environment leaks into whatever runs next.
+
+    Autouse fixtures set up before `monkeypatch` and therefore tear down after
+    it, which means this reload always sees the restored environment.
+    """
+    get_settings(refresh=True)
+    yield
+    get_settings(refresh=True)
+
+
 # Re-export Postgres fixtures so `db` / `db_engine` resolve in any test module.
-from db_fixtures import db, db_engine  # noqa: E402,F401
+from db_fixtures import db, db_engine, global_session  # noqa: E402,F401

@@ -1,0 +1,141 @@
+# The gates from CLAUDE.md, run automatically.
+#
+# Same commands, same order, so a green tick here means the same thing as a
+# clean local run — no CI-only shortcuts and no CI-only extras.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python gates
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # pgvector, not plain postgres: the embedding pre-filter is a `vector`
+        # column, and the fixtures create the extension on the test database.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      JOBPILOT_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/jobpilot_test
+      # Without this, an unreachable database turns most of the suite into
+      # skips and still reports success.
+      JOBPILOT_REQUIRE_POSTGRES: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # WeasyPrint lays text out through Pango. Missing fonts do not raise —
+      # they render blank boxes, and the PDF round-trip test then fails in a way
+      # that looks like a code bug.
+      - name: Install WeasyPrint system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfribidi0 \
+            shared-mime-info fonts-dejavu-core
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Migrations apply cleanly from empty
+        # Catches a model changed without a migration, which the test suite
+        # cannot see: it builds tables from metadata, not from Alembic.
+        env:
+          JOBPILOT_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/jobpilot_migrations
+        run: |
+          PGPASSWORD=postgres createdb -h localhost -U postgres jobpilot_migrations
+          PGPASSWORD=postgres psql -h localhost -U postgres -d jobpilot_migrations \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector'
+          uv run alembic upgrade head
+
+      - name: Tests
+        run: uv run pytest
+
+  web:
+    name: Dashboard gates
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run test
+
+      - run: npm run build
+
+  images:
+    name: Container images build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built, not pushed. The dev machine has no Docker (CLAUDE.md), so this is
+      # the only place these files are ever exercised — without it they are
+      # plausible-looking text nobody has run.
+      - name: API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile.api
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile.worker
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Compose file is valid
+        run: docker compose -f infra/docker-compose.yml config --quiet
+        env:
+          POSTGRES_PASSWORD: ci-only-not-a-real-password

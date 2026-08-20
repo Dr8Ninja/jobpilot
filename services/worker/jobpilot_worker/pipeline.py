@@ -11,9 +11,10 @@ import pathlib
 from dataclasses import dataclass, field
 
 from jobpilot_shared.canonical_facts import CanonicalFacts
-from jobpilot_shared.db.models import Application, Company, Event, Job, Profile
+from jobpilot_shared.db.models import Application, Company, Event, Job, Profile, Score
+from jobpilot_shared.ownership import owner_id
 from jobpilot_shared.settings import get_settings
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .clients.embeddings import EmbeddingClient, get_embedding_client
@@ -64,9 +65,28 @@ class PipelineReport:
             f"pdfs={self.pdfs_rendered}"
         )
 
+    def as_dict(self) -> dict:
+        """JSON for `pipeline_runs.summary`.
 
-def load_facts(session: Session) -> CanonicalFacts:
-    profile = session.scalar(select(Profile))
+        `text` is the same one-liner the CLI prints, so a run reads identically
+        whether you saw it in a terminal or are reading it back from the API.
+        """
+        payload = {name: getattr(self, name) for name in self.__dataclass_fields__}
+        payload["text"] = self.summary()
+        return payload
+
+
+def load_facts(session: Session, user_id: int | None = None) -> CanonicalFacts:
+    """The immutable facts every tailored resume is checked against.
+
+    Scoped to a user. This used to be `select(Profile)` — whichever row came
+    back first — which is harmless with one profile and quietly wrong with two:
+    the whitelist a resume is validated against has to belong to the person
+    whose resume it is.
+    """
+    if user_id is None:
+        user_id = owner_id(session)
+    profile = session.get(Profile, user_id) if user_id is not None else None
     if profile is None:
         raise RuntimeError(
             "No confirmed canonical_facts. Run `jobpilot ingest-resume <pdf>`, edit "
@@ -155,6 +175,75 @@ def run_discovery(session: Session, report: PipelineReport) -> None:
     session.flush()
 
 
+def tailor_application(
+    session: Session,
+    application_id: int,
+    *,
+    llm: LLMClient | None = None,
+    storage_dir: pathlib.Path | None = None,
+) -> dict:
+    """Tailor one shortlisted card on demand.
+
+    The nightly run only tailors what clears the threshold and fits the daily
+    cap. This is the manual override: something in the shortlist looked worth
+    pursuing, so it gets a tailored resume and joins the review queue.
+
+    It lives here rather than in the API because it is a composition of stages,
+    and because both the request handler and the Celery task need it. Up to
+    three attempts at 180s each is far longer than a browser will wait, which is
+    exactly why the caller enqueues this instead of running it inline.
+    """
+    application = session.get(Application, application_id)
+    if application is None:
+        raise LookupError(f"No application with id {application_id}")
+
+    facts = load_facts(session, application.user_id)
+    job = session.get(Job, application.job_id)
+    latest_score = session.scalar(
+        select(Score).where(Score.job_id == job.id).order_by(desc(Score.scored_at)).limit(1)
+    )
+    gaps = ((latest_score.verdict if latest_score else {}) or {}).get("keyword_gaps", [])
+
+    attempt = tailor.tailor_job(facts, job, gaps, llm or get_llm_client(purpose="tailoring"))
+    run = tailor.persist_tailoring(session, job, attempt)
+    application.tailoring_run_id = run.id
+
+    if not attempt.passed:
+        # Layer two of the gate. A run that failed the fact-check is never
+        # rendered and never reaches the review queue.
+        application.status = "needs_human"
+        session.commit()
+        return {
+            "application_id": application.id,
+            "status": application.status,
+            "whitelist_passed": False,
+            "pdf_rendered": False,
+        }
+
+    rendered = False
+    try:
+        path = render_pdf(
+            facts,
+            attempt.output,
+            (storage_dir or STORAGE_DIR) / f"job-{job.id}.pdf",
+            target_company=job.company.name if job.company else None,
+        )
+        run.pdf_path = str(path)
+        rendered = True
+    except RenderFailed as exc:
+        log.warning("PDF render failed for job %s: %s", job.id, exc)
+        session.add(Event(job_id=job.id, type="render.failed", payload={"error": str(exc)}))
+
+    application.status = "queued"
+    session.commit()
+    return {
+        "application_id": application.id,
+        "status": application.status,
+        "whitelist_passed": True,
+        "pdf_rendered": rendered,
+    }
+
+
 def run_pipeline(
     session: Session,
     *,
@@ -171,7 +260,8 @@ def run_pipeline(
     storage = storage_dir or STORAGE_DIR
     report = PipelineReport()
 
-    facts = load_facts(session)
+    user_id = owner_id(session)
+    facts = load_facts(session, user_id)
 
     run_discovery(session, report)
     # Commit after each expensive stage. Without this, a provider timeout in a
@@ -207,7 +297,7 @@ def run_pipeline(
     for row in scores:
         if row.job_id in selected_ids:
             continue
-        session.add(Application(job_id=row.job_id, status="not_selected"))
+        session.add(Application(job_id=row.job_id, status="not_selected", user_id=user_id))
         report.not_selected += 1
     session.commit()
 
@@ -226,7 +316,7 @@ def run_pipeline(
             log.warning("Tailoring failed for job %s: %s", job_id, exc)
             session.rollback()
             session.add(Event(job_id=job_id, type="tailor.failed", payload={"error": str(exc)}))
-            session.add(Application(job_id=job_id, status="not_selected"))
+            session.add(Application(job_id=job_id, status="not_selected", user_id=user_id))
             report.tailoring_failed += 1
             session.commit()
             continue
@@ -234,7 +324,14 @@ def run_pipeline(
 
         if not attempt.passed:
             report.tailored_needs_human += 1
-            session.add(Application(job_id=job.id, tailoring_run_id=run.id, status="needs_human"))
+            session.add(
+                Application(
+                    job_id=job.id,
+                    tailoring_run_id=run.id,
+                    status="needs_human",
+                    user_id=user_id,
+                )
+            )
             session.commit()
             continue
 
@@ -253,7 +350,9 @@ def run_pipeline(
             log.warning("PDF render failed for job %s: %s", job.id, exc)
             session.add(Event(job_id=job.id, type="render.failed", payload={"error": str(exc)}))
 
-        session.add(Application(job_id=job.id, tailoring_run_id=run.id, status="queued"))
+        session.add(
+            Application(job_id=job.id, tailoring_run_id=run.id, status="queued", user_id=user_id)
+        )
         session.commit()
 
     session.add(Event(type="pipeline.completed", payload={"summary": report.summary()}))

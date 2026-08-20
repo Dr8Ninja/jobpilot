@@ -77,13 +77,17 @@ export default async function QueuePage({
   const location = overseas ? "overseas" : PREFERRED_LOCATIONS;
 
   let cards: QueueCard[] = [];
+  let total = 0;
   let counts: StatusCount[] = [];
   let error: string | null = null;
   try {
-    [cards, counts] = await Promise.all([
+    const [page, fetchedCounts] = await Promise.all([
       getQueue(overseas ? undefined : active || undefined, location),
       getCounts(),
     ]);
+    cards = page.cards;
+    total = page.total;
+    counts = fetchedCounts;
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not reach the API";
   }
@@ -95,7 +99,9 @@ export default async function QueuePage({
           {overseas ? "Overseas roles" : "Review queue"}
         </h1>
         <span className="text-[13px] text-muted">
-          {cards.length} application{cards.length === 1 ? "" : "s"}
+          {total > cards.length
+            ? `${cards.length} of ${total} applications`
+            : `${cards.length} application${cards.length === 1 ? "" : "s"}`}
         </span>
       </div>
 
@@ -127,6 +133,13 @@ export default async function QueuePage({
           <Row key={card.application_id} card={card} />
         ))}
       </div>
+
+      {total > cards.length && (
+        <p className="mt-4 text-[13px] text-muted">
+          Showing the first {cards.length} of {total}. Narrow the tab, or clear some of
+          the queue, to see the rest.
+        </p>
+      )}
     </div>
   );
 }

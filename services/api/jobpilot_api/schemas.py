@@ -1,6 +1,7 @@
 """Response shapes for the review dashboard."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -95,3 +96,32 @@ class SkillGapRow(BaseModel):
     job_count: int
     companies: list[str]
     examples: list[SkillGapExample]
+
+
+class RunRequest(BaseModel):
+    """What to run. `application_id` is required for, and only for, `tailor`."""
+
+    kind: Literal["pipeline", "discovery", "tailor"]
+    application_id: int | None = None
+
+
+class RunStatus(BaseModel):
+    """A background run, as the dashboard polls it."""
+
+    id: int
+    kind: str
+    status: str
+    params: dict | None
+    summary: dict | None
+    error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
+class TailorAccepted(BaseModel):
+    """202 from the tailor endpoint: the work is queued, not done."""
+
+    application_id: int
+    run_id: int
+    status: str

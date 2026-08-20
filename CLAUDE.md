@@ -63,7 +63,8 @@ README.md                 # setup + how to run it
 /packages/extension       # assisted-apply browser extension — Phase 1, not created yet
 /packages/shared          # canonical_facts, tailoring/scoring IO, the whitelist gate, db models
 /migrations               # Alembic
-/infra                    # seed_companies.yaml; docker-compose is Phase 1+
+/infra                    # seed_companies.yaml; Dockerfiles + docker-compose
+/.github/workflows        # CI running the gates above
 /tests                    # shared/ worker/ api/ + fixtures
 ```
 
@@ -73,18 +74,23 @@ README.md                 # setup + how to run it
 # Pipeline (each stage is individually invocable; run-pipeline composes them)
 uv run jobpilot version | seed-companies | ingest-resume | confirm-facts
 uv run jobpilot discover | run-pipeline | queue
+uv run jobpilot run-pipeline --enqueue            # hand it to the worker
+uv run jobpilot run-status <id>                   # how a background run ended
 
 # Services
 uv run uvicorn jobpilot_api.main:app --reload     # API on :8000
 cd apps/web && npm run dev                        # dashboard on :3000
+celery -A jobpilot_worker.celery_app worker --loglevel=info --concurrency=1
+celery -A jobpilot_worker.celery_app beat --loglevel=info   # nightly run
 
 # Quality gates (must pass before "done")
 uv run ruff check . && uv run ruff format --check .
 uv run pytest
 cd apps/web && npm run typecheck && npm run test && npm run build
 
-# Infra — local Postgres, not Docker (no Docker on the dev machine)
+# Infra — local Postgres and Redis, not Docker (no Docker on the dev machine)
 brew services start postgresql@17
+brew services start redis
 uv run alembic upgrade head
 ```
 
@@ -164,11 +170,17 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 
 ## Progress ledger (living — update at the end of every session)
 
-**Current phase:** Phase 0
-**Now working on:** Phase 0 runs live against the real resume and 94 verified boards (13,265 jobs). Selection now drops only on seniority and location; a skills gap never drops a job. Remaining Phase 0 item: Celery beat schedule.
-**Next action:** `docs/ROADMAP.md` holds the gap audit and five phased master
-prompts (A backend foundation → E intelligence). Start with Phase A.
-**Blockers:** response-rate baseline figure still not supplied. GLM-5.2/DeepSeek V4 Pro unavailable on the provided key.
+**Current phase:** Phase A complete (backend foundation). Phase 0 is closed.
+**Now working on:** Nothing in flight. Phase A moved pipeline runs onto Celery +
+Redis behind a `pipeline_runs` table, added the nightly beat schedule (the last
+open Phase 0 item), fixed the queue N+1 and added pagination, and gave the API a
+versioned prefix, structured errors, request logging, settings-driven CORS and
+optional token auth with `user_id` scoping.
+**Next action:** Phase B (measurement loop) — its master prompt is in
+`docs/ROADMAP.md`. It resolves open question #1, which has been outstanding since
+day one and which no later phase can be judged without.
+**Blockers:** response-rate baseline figure still not supplied — Phase B is where
+it gets captured. GLM-5.2/DeepSeek V4 Pro unavailable on the provided key.
 
 ### Done
 - [x] Phase 0 design spec + implementation plan (`docs/superpowers/specs/`, `docs/superpowers/plans/`)
@@ -193,11 +205,40 @@ prompts (A backend foundation → E intelligence). Start with Phase A.
       (`packages/shared/jobpilot_shared/location.py`)
 - [x] Skills-to-learn report — `/api/skill-gaps`, dashboard at `/skills`
 - [x] Forward-deployed / AI aggregator queries; 19 more verified AI-forward boards
+- [x] **Celery beat schedule** wrapping `run_pipeline` — the last Phase 0 item
+- [x] Async job runner: `pipeline_runs` table, `POST /api/v1/runs`,
+      `GET /api/v1/runs/{id}`; the CLI still runs inline by default
+- [x] Queue pagination + the N+1 fix (lateral joins), proved by counting queries
+- [x] `/api/v1` prefix with the unprefixed paths still routing; structured errors
+      that keep `detail` where the dashboard reads it; request-id logging;
+      settings-driven CORS
+- [x] Single-user bearer-token auth (off by default) and `user_id` scoping —
+      `users`/`profiles` are load-bearing at last
+- [x] Dockerfiles for API and worker, docker-compose, and GitHub Actions CI
 
 ### In progress
-- [ ] Celery beat schedule wrapping `run_pipeline` (the last Phase 0 item)
+- Nothing. Phase B is the next unit of work.
 
 ### Decisions worth remembering
+- **A test fixture that cannot fail is not a test.** The `db` fixture joined its
+  outer transaction in SQLAlchemy's default `conditional_savepoint` mode, which
+  degrades to `rollback_only` against a plain transaction: `commit()` did not
+  durably land and `rollback()` discarded the *whole* test transaction. Code that
+  commits a checkpoint and then rolls back a later failure — the pipeline and the
+  run bookkeeping both do this deliberately — could not be tested honestly under
+  those semantics. It is `create_savepoint` now.
+- **Do not touch an ORM attribute before you roll back.** `execute_run` logged
+  `run.kind` in its `except` block. A failed flush expires the instance, so that
+  read re-queried on a transaction Postgres had already aborted, and the log line
+  became the thing that lost the record. Capture what you need before the work.
+- **`JOBPILOT_DATABASE_URL` did nothing.** `database_url` was the one setting
+  without the `_jobpilot` alias, so only bare `DATABASE_URL` was read — a
+  deployment setting the obvious prefixed name connected to the localhost default
+  instead and looked fine. Found by verifying a CI step rather than by reading it.
+- **CI must fail when the database is missing.** Database tests skip when
+  Postgres is unreachable, which is right on a laptop and dangerous in CI, where a
+  mistyped URL turns most of the suite into skips and reports green.
+  `JOBPILOT_REQUIRE_POSTGRES=1` turns that skip into a failure.
 - **The document's shape is the candidate's, not the model's.** Every live
   tailoring returned fewer bullets than the resume has — one gave 1 bullet for a
   5-bullet role — and the renderer published the truncation. `bullets_for_render`

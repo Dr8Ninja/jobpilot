@@ -11,7 +11,7 @@ import sys
 
 import typer
 from jobpilot_shared.canonical_facts import CanonicalFacts
-from jobpilot_shared.db.models import Profile, User
+from jobpilot_shared.db.models import PipelineRun, Profile, User
 from jobpilot_shared.db.session import session_scope
 from jobpilot_shared.settings import get_settings
 
@@ -108,9 +108,15 @@ def ingest_resume(
 
 @app.command("confirm-facts")
 def confirm_facts(
-    email: str = typer.Option("owner@localhost", help="Owner email for the profile row"),
+    email: str = typer.Option("", help="Owner email for the profile row"),
 ) -> None:
-    """Validate profile/canonical_facts.json and load it into the database."""
+    """Validate profile/canonical_facts.json and load it into the database.
+
+    The email identifies the `users` row that owns this installation; the API
+    and the worker resolve the same row through `owner_email`, which is what
+    makes the profile lookup scoped rather than "whichever row comes back".
+    """
+    email = email or get_settings().owner_email
     if not FACTS_PATH.exists():
         typer.secho(
             f"{FACTS_PATH} not found. Run `jobpilot ingest-resume <pdf>` first.",
@@ -151,21 +157,87 @@ def run_pipeline_command(
     storage: pathlib.Path = typer.Option(
         pathlib.Path("storage/resumes"), help="Where tailored PDFs are written"
     ),
+    enqueue: bool = typer.Option(
+        False,
+        "--enqueue",
+        help="Hand the run to the Celery worker and return, instead of running it here.",
+    ),
 ) -> None:
-    """Discover → dedupe → embed → score → tailor → render, in one pass."""
-    from jobpilot_worker.pipeline import run_pipeline
+    """Discover → dedupe → embed → score → tailor → render, in one pass.
+
+    Inline by default, exactly as it has always been. `--enqueue` needs Redis
+    and a running worker; it prints a run id to poll with `run-status`.
+    """
+    from jobpilot_worker.runs import create_run, execute_run
 
     settings = get_settings()
     if settings.fixture_mode:
         _echo_warn("Fixture mode: using recorded data, no external API calls.")
 
+    params = {"storage_dir": str(storage)}
     with session_scope() as session:
-        report = run_pipeline(session, storage_dir=storage)
+        run = create_run(session, "pipeline", params)
+        session.commit()
+        run_id = run.id
+
+    if enqueue:
+        from jobpilot_worker import celery_app
+
+        try:
+            celery_app.enqueue_run(run_id)
+        except Exception as exc:
+            typer.secho(
+                f"Could not reach the task queue: {exc}\n"
+                "Start Redis (`brew services start redis`) and a worker "
+                "(`celery -A jobpilot_worker.celery_app worker`).",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1) from exc
+        _echo_ok(f"Queued run {run_id}. Poll it with: jobpilot run-status {run_id}")
+        return
+
+    execute_run(run_id)
+
+    with session_scope() as session:
+        run = session.get(PipelineRun, run_id)
+        status, summary, error = run.status, run.summary or {}, run.error
 
     typer.echo("")
-    _echo_ok(report.summary())
-    for note in report.notes:
+    if status != "succeeded":
+        typer.secho(f"Run {run_id} failed: {error}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    _echo_ok(summary.get("text", ""))
+    for note in summary.get("notes", []):
         typer.echo(f"  note: {note}")
+
+
+@app.command("run-status")
+def run_status(run_id: int = typer.Argument(..., help="Run id from `run-pipeline --enqueue`")):
+    """Print the state of a background run."""
+    with session_scope() as session:
+        run = session.get(PipelineRun, run_id)
+        if run is None:
+            typer.secho(f"No run with id {run_id}.", fg=typer.colors.RED)
+            raise typer.Exit(1)
+        status, summary, error, started, finished = (
+            run.status,
+            run.summary or {},
+            run.error,
+            run.started_at,
+            run.finished_at,
+        )
+
+    typer.echo(f"run {run_id}: {status}")
+    if started:
+        typer.echo(f"  started:  {started.isoformat()}")
+    if finished:
+        typer.echo(f"  finished: {finished.isoformat()}")
+    if summary.get("text"):
+        typer.echo(f"  {summary['text']}")
+    for note in summary.get("notes", []):
+        typer.echo(f"  note: {note}")
+    if error:
+        typer.secho(f"  error: {error}", fg=typer.colors.RED)
 
 
 @app.command()

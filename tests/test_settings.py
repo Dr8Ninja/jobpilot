@@ -82,3 +82,33 @@ def test_embedding_token_budget_stays_under_the_providers_hard_limit() -> None:
     from jobpilot_worker.stages.embed import EMBEDDING_TOKEN_LIMIT
 
     assert Settings().embedding_token_budget < EMBEDDING_TOKEN_LIMIT
+
+
+@pytest.mark.parametrize("var", ["JOBPILOT_DATABASE_URL", "DATABASE_URL"])
+def test_database_url_accepts_prefixed_and_bare_env_var(monkeypatch, var: str) -> None:
+    """Deployment configs reach for the prefixed name like every other setting.
+
+    Without the alias, `JOBPILOT_DATABASE_URL` is silently ignored and the
+    process connects to the default localhost database instead — which looks
+    like working software right up until it writes somewhere unintended.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("JOBPILOT_DATABASE_URL", raising=False)
+    monkeypatch.setenv(var, "postgresql+psycopg://elsewhere:5432/other")
+    assert Settings().database_url == "postgresql+psycopg://elsewhere:5432/other"
+
+
+@pytest.mark.parametrize(
+    "var", ["JOBPILOT_REDIS_URL", "JOBPILOT_CORS_ORIGINS", "JOBPILOT_API_TOKEN"]
+)
+def test_new_backend_settings_take_the_prefixed_name(monkeypatch, var: str) -> None:
+    monkeypatch.setenv(var, "value")
+    assert Settings().model_dump()[var.removeprefix("JOBPILOT_").lower()] == "value"
+
+
+def test_auth_is_off_and_the_nightly_run_is_on_by_default() -> None:
+    s = Settings()
+    assert s.auth_enabled is False
+    assert s.nightly_run_enabled is True
+    assert s.nightly_run_hour == 2
+    assert s.broker_url() == "redis://localhost:6379/0"

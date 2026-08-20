@@ -12,7 +12,14 @@ def _jobpilot(name: str) -> AliasChoices:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    database_url: str = "postgresql+psycopg://localhost:5432/jobpilot"
+    #: Aliased like every other setting. Bare `DATABASE_URL` alone was a trap:
+    #: a deployment that set `JOBPILOT_DATABASE_URL` — the obvious name, and the
+    #: one the compose file and CI use — was silently ignored, and the process
+    #: quietly connected to the localhost default instead.
+    database_url: str = Field(
+        default="postgresql+psycopg://localhost:5432/jobpilot",
+        validation_alias=_jobpilot("database_url"),
+    )
 
     # Credentials. Empty is legal — fixture_mode runs the pipeline without them.
     anthropic_api_key: str = ""
@@ -61,6 +68,65 @@ class Settings(BaseSettings):
     #: Roles outside India/remote are kept and shown in their own tab, but they do
     #: not consume the daily tailoring budget unless promoted by hand.
     tailor_overseas: bool = Field(default=False, validation_alias=_jobpilot("tailor_overseas"))
+
+    # ---- API ---------------------------------------------------------------
+    #: Browser origins allowed to call the API. The default is the local Next.js
+    #: dev server; a deployment sets its own and this stops being hardcoded.
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        validation_alias=_jobpilot("cors_origins"),
+    )
+
+    #: Level for the `jobpilot.*` loggers, including the request log.
+    log_level: str = Field(default="INFO", validation_alias=_jobpilot("log_level"))
+
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    #: Off by default. This tool has always run on localhost, and switching a
+    #: lock on by surprise locks the owner out of their own queue. Turn it on
+    #: before the port is reachable from anywhere else — until then, anyone who
+    #: can reach it can approve applications and download the user's resume.
+    auth_enabled: bool = Field(default=False, validation_alias=_jobpilot("auth_enabled"))
+    #: The bearer token. Required when `auth_enabled`; the app refuses to start
+    #: without it rather than serving a lock with no key.
+    api_token: str = Field(default="", validation_alias=_jobpilot("api_token"))
+    #: Which `users` row owns this installation. `confirm-facts` writes it.
+    owner_email: str = Field(default="owner@localhost", validation_alias=_jobpilot("owner_email"))
+
+    # ---- Async runner -----------------------------------------------------
+    #: Broker and result backend. Both default to this one URL because a
+    #: single-user tool has no reason to split them.
+    redis_url: str = Field(
+        default="redis://localhost:6379/0", validation_alias=_jobpilot("redis_url")
+    )
+    celery_broker_url: str = Field(default="", validation_alias=_jobpilot("celery_broker_url"))
+    celery_result_backend: str = Field(
+        default="", validation_alias=_jobpilot("celery_result_backend")
+    )
+    #: Run enqueued work inline, in-process, with no broker. The escape hatch for
+    #: a machine that is not running Redis — it blocks the caller, which is the
+    #: very thing the runner exists to avoid, so it is off by default.
+    celery_task_always_eager: bool = Field(
+        default=False, validation_alias=_jobpilot("celery_task_always_eager")
+    )
+    celery_timezone: str = Field(
+        default="Asia/Kolkata", validation_alias=_jobpilot("celery_timezone")
+    )
+
+    #: The nightly pipeline. Off means beat schedules nothing at all — volume is
+    #: a dial the user turns, never something that starts itself by surprise.
+    nightly_run_enabled: bool = Field(
+        default=True, validation_alias=_jobpilot("nightly_run_enabled")
+    )
+    nightly_run_hour: int = Field(default=2, validation_alias=_jobpilot("nightly_run_hour"))
+    nightly_run_minute: int = Field(default=0, validation_alias=_jobpilot("nightly_run_minute"))
+
+    def broker_url(self) -> str:
+        return self.celery_broker_url or self.redis_url
+
+    def result_backend(self) -> str:
+        return self.celery_result_backend or self.redis_url
 
     # "nvidia" (OpenAI-compatible NIM) or "anthropic".
     llm_provider: str = Field(default="nvidia", validation_alias=_jobpilot("llm_provider"))
