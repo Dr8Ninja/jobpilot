@@ -166,7 +166,8 @@ Build the full pipeline end-to-end except automated form-fill; user applies manu
 
 **Current phase:** Phase 0
 **Now working on:** Phase 0 runs live against the real resume and 94 verified boards (13,265 jobs). Selection now drops only on seniority and location; a skills gap never drops a job. Remaining Phase 0 item: Celery beat schedule.
-**Next action:** user judges tailoring quality on the live queue; then Phase 1 (assisted-apply extension).
+**Next action:** `docs/ROADMAP.md` holds the gap audit and five phased master
+prompts (A backend foundation → E intelligence). Start with Phase A.
 **Blockers:** response-rate baseline figure still not supplied. GLM-5.2/DeepSeek V4 Pro unavailable on the provided key.
 
 ### Done
